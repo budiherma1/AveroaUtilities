@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import { edge } from '@averoa/core';
 import path from 'path';
+import Queue from './Queue.js';
 import config from './../../../config/mail.js';
 const __dirname = path.resolve();
 
@@ -61,11 +62,11 @@ class Mail {
 			...this.v_additional
 		};
 		if (this.channel) {
+			Queue(this.channel, option)
 			return {
 				status: 'queued',
 				channel: this.channel,
 				data: option
-
 			}
 		} else {
 			let info = await this.transporter.sendMail(option);
