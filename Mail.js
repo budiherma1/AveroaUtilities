@@ -1,72 +1,82 @@
-'use strict';
-
-import amqplib from 'amqplib/callback_api.js';
+import nodemailer from 'nodemailer';
+import { edge } from '@averoa/core';
+import path from 'path';
 import config from './../../../config/mail.js';
+const __dirname = path.resolve();
 
-// Create connection to AMQP server
-const sendMail = () => {
+class Mail {
+	constructor() {
+		this.v_from = '';
+		this.v_to = '';
+		this.v_subject = '';
+		this.v_html = '';
+		this.v_text = '';
+		this.v_additional = {};
+		this.channel = '';
+		this.transporter = nodemailer.createTransport(config);
+	}
 
-	amqplib.connect(config.amqp, (err, connection) => {
-		if (err) {
-			console.error(err.stack);
-			return process.exit(1);
-		}
+	from(from) {
+		this.v_from = from;
+		return this
+	}
+	to(to) {
+		this.v_to = to;
+		return this;
+	}
+	subject(subject) {
+		this.v_subject = subject;
+		return this
+	}
+	html(view, variable={}) {
+		
+		this.v_html = async()=> {
+			edge.mount(path.join(__dirname, '/resources/views'))
+			let html = view;
+			try {
+				html = await edge.render(view, variable)
+			} catch (e) {}
+			return html;
+		};
+
+		return this;
+	}
+	text(text) {
+		this.v_text = text;
+		return this
+	}
+	additional(opt={}) {
+		this.v_additional = opt;
+		return this
+	}
 	
-		// Create channel
-		connection.createChannel((err, channel) => {
-			if (err) {
-				console.error(err.stack);
-				return process.exit(1);
+	async send() {
+		let html = await this.v_html();
+		let option = {
+			from: this.v_from,
+			to: this.v_to,
+			subject: this.v_subject,
+			text: this.v_text,
+			html: html,
+			...this.v_additional
+		};
+		if (this.channel) {
+			return {
+				status: 'queued',
+				channel: this.channel,
+				data: option
+
 			}
-	
-			// Ensure queue for messages
-			channel.assertQueue(config.queue, {
-				// Ensure that the queue is not deleted when server restarts
-				durable: true
-			}, err => {
-				if (err) {
-					console.error(err.stack);
-					return process.exit(1);
-				}
-	
-				// Create a function to send objects to the queue
-				// Javascript object is converted to JSON and then into a Buffer
-				let sender = (content, next) => {
-					let sent = channel.sendToQueue(config.queue, Buffer.from(JSON.stringify(content)), {
-						// Store queued elements on disk
-						persistent: true,
-						contentType: 'application/json'
-					});
-					if (sent) {
-						return next();
-					} else {
-						channel.once('drain', () => next());
-					}
-				};
-	
-				// push 100 messages to queue
-				let sent = 0;
-				let sendNext = () => {
-					if (sent >= 3) {
-						console.log('All messages sent!');
-						// Close connection to AMQP server
-						// We need to call channel.close first, otherwise pending
-						// messages are not written to the queue
-						return channel.close(() => connection.close());
-					}
-					sent++;
-					sender({
-						to: 'recipient@example.com',
-						subject: 'Test message #' + sent,
-						text: 'hello world!'
-					}, sendNext);
-				};
-	
-				sendNext();
-	
-			});
-		});
-	});
+		} else {
+			let info = await this.transporter.sendMail(option);
+			return info
+		}
+
+	}
+	queue(channel) {
+		this.channel = channel;
+		return this;
+	}
 }
 
-export default sendMail;
+export default new Mail
