@@ -17,6 +17,10 @@ class Mail {
 		this.transporter = nodemailer.createTransport(config);
 	}
 
+	static init() {
+		return new this;
+	}
+
 	from(from) {
 		this.v_from = from;
 		return this
@@ -52,7 +56,14 @@ class Mail {
 	}
 	
 	async send() {
-		let html = await this.v_html();
+
+		let html;
+		try {
+			html = await this.v_html();
+		} catch(e) {
+			html = '';
+		}
+		
 		let option = {
 			from: this.v_from,
 			to: this.v_to,
@@ -61,6 +72,7 @@ class Mail {
 			html: html,
 			...this.v_additional
 		};
+
 		if (this.channel) {
 			Queue(this.channel, option)
 			return {
@@ -80,4 +92,4 @@ class Mail {
 	}
 }
 
-export default new Mail
+export default Mail
