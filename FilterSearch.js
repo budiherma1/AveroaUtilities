@@ -166,6 +166,8 @@ class FilterSearch {
 				if (typeof Number(pVal) === 'number') {
 					this.data.offset(Number(pVal));
 				}
+			} else if (key === '$relations') {
+				this.data.withGraphFetched(pVal);
 			} else if (this.type === 'model') {
 				if (key in this.table.column || (this.timestamp && this.timestampColumn.includes(key))) {
 					this.data.where(key, pVal);
