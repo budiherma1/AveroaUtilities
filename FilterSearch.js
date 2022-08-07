@@ -166,7 +166,14 @@ class FilterSearch {
 				if (typeof Number(pVal) === 'number') {
 					this.data.offset(Number(pVal));
 				}
-			} else if (key === '$relations') {
+			} else if (key === '$relations' && this.type === 'model') {
+				let valSplit = pVal.replace('[','').replace(']', '').replace(' ', '').split(',');
+				for(const val of valSplit) {
+					if (!Object.keys(this.table.relationMappings).includes(val)) {
+						return { status: false, message: `relation ${val} doesn't exist` };
+					}
+				}
+
 				this.data.withGraphFetched(pVal);
 			} else if (this.type === 'model') {
 				if (key in this.table.column || (this.timestamp && this.timestampColumn.includes(key))) {
