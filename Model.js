@@ -211,9 +211,9 @@ class Model extends Objection {
 
   static mapRequest(req, res, next, additional = {}) {
     if (additional?.type === 'multipart') {
-      req.dataReq = { ...req.body };
+      req.dataReq = req.body;
     } else {
-      req.dataReq = { ...req.query };
+      req.dataReq = req.query;
     }
     return next();
   }
