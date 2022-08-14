@@ -212,6 +212,7 @@ class Model extends Objection {
   static mapRequest(req, res, next, additional = {}) {
     if (additional?.type === 'multipart') {
       req.dataReq = req.body;
+      req.isFormData = true;
     } else {
       req.dataReq = req.query;
     }
