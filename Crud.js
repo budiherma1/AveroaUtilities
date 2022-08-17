@@ -1,9 +1,18 @@
 import moment from 'moment';
+import { UploadProvider } from '../../../app/Providers/index.js'
 
 class Crud {
   static async create(model, req, option = {}) {
     const importModel = (await import(`@averoa/models`))[model];
-    let additionalCreate = option.create ?? {}
+    let additionalCreate = option.insert ?? {}
+
+    if (req.dataFiles !== undefined) {
+      for(const key in req.dataFiles) {
+        let upload = await UploadProvider.upload(req.dataFiles[key], req.routeData)
+        req.dataReq[key] = upload;
+      }
+    }
+
     const data = await importModel.query().insert({ ...req.dataReq, ...additionalCreate });
     return data;
   }
@@ -28,6 +37,15 @@ class Crud {
   static async update(model, req, option = {}) {
     const importModel = (await import(`@averoa/models`))[model];
     let additionalUpdate = option.update ?? {}
+
+    if (req.dataFiles !== undefined) {
+      let oldData = await importModel.query().findById(req.params.id);
+      for(const key in req.dataFiles) {
+        let upload = await UploadProvider.upload(req.dataFiles[key], req.routeData, oldData[key])
+        req.dataReq[key] = upload;
+      }
+    }
+
     const data = await importModel.query()
       .findById(req.params.id)
       .update({ ...req.dataReq, ...additionalUpdate });
