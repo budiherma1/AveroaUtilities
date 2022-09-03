@@ -1,15 +1,29 @@
 class FilterSearch {
-	static model(table, req, config = {}) {
+	static async model(table, req, config = {}) {
 		const filterSearch = new this;
-		return filterSearch.init('model', table, req, config);
+		try {
+			return await filterSearch.init('model', table, req, config);
+		} catch (e) {
+			return {
+				status: false,
+				message: e.message,
+			}
+		}
 	}
 
-	static knex(table, req, config = {}) {
+	static async knex(table, req, config = {}) {
 		if (!config.column) {
 			return { status: false, message: 'need to define column array' };
 		}
 		const filterSearch = new this;
-		return filterSearch.init('knex', table, req, config);
+		try {
+			return await filterSearch.init('knex', table, req, config);
+		} catch (e) {
+			return {
+				status: false,
+				message: e.message,
+			}
+		}
 	}
 
 	init(type, table, req, config) {
@@ -167,12 +181,12 @@ class FilterSearch {
 					this.data.offset(Number(pVal));
 				}
 			} else if (key === '$relations' && this.type === 'model') {
-				let valSplit = pVal.replace('[','').replace(']', '').replace(' ', '').split(',');
-				for(const val of valSplit) {
-					if (!Object.keys(this.table.relationMappings).includes(val)) {
-						return { status: false, message: `relation ${val} doesn't exist` };
-					}
-				}
+				// let valSplit = pVal.replace('[','').replace(']', '').replace(' ', '').split(',');
+				// for(const val of valSplit) {
+				// 	if (!Object.keys(this.table.relationMappings).includes(val)) {
+				// 		return { status: false, message: `relation ${val} doesn't exist` };
+				// 	}
+				// }
 
 				this.data.withGraphFetched(pVal);
 			} else if (this.type === 'model') {
