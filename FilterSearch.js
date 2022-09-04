@@ -26,8 +26,9 @@ class FilterSearch {
 		}
 	}
 
-	init(type, table, req, config) {
+	async init(type, table, req, config) {
 		this.timestampColumn = ['created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at', 'deleted_by'];
+		this.pagination = ['limit', 'page'];
 		if (type === 'model') {
 			this.timestamp = table.timestamp
 		} else {
@@ -39,7 +40,32 @@ class FilterSearch {
 		this.data = type === 'model' ? table.query() : table;
 		this.config = config;
 
-		return this.exec();
+		if (!Object.keys(this.filter).includes('limit')) {
+			this.filter.limit = this.config.limit ?? 10;
+		}
+		if (!Object.keys(this.filter).includes('page')) {
+			this.filter.page = this.config.page ?? 1;
+		}
+
+		let query = this.exec();
+		let limit = Number(this.filter.limit);
+		let page = Number(this.filter.page);
+		let dataCount = await query.clone().count();
+		let data = await query.limit(limit).offset((page - 1) * limit);
+		let count = dataCount[0]['count(*)'];
+		const page_total = limit > count ? 1 : Math.round(count / limit);
+		return {
+			status: true,
+			metadata: {
+				item_total: count,
+				per_page: limit > count ? count : limit,
+				page_total,
+				current_page: page,
+				has_next_page: page < page_total,
+				has_prev_page: page !== 1 && page <= page_total,
+			},
+			data,
+		}
 	}
 
 	// filtering params column, only existing column that will be processing 
@@ -81,11 +107,12 @@ class FilterSearch {
 
 	// execute filtering
 	exec() {
-		if (!Object.keys(this.filter).includes('limit')) {
-			this.filter.limit = this.config.limit ?? 10;
-		}
 		for (const key in this.filter) {
 			const pVal = this.filter[key];
+
+			if (this.pagination.includes(key)) {
+				continue;
+			}
 
 			if (key.split(':')[1] === 'eq') {
 				this.filterProcess(':eq', key, (builder, col) => {
@@ -172,22 +199,7 @@ class FilterSearch {
 				if (this.sanitize(pVal)) {
 					this.data.groupBy(pVal);
 				}
-			} else if (key === 'limit') {
-				if (typeof Number(pVal) === 'number') {
-					this.data.limit(Number(pVal));
-				}
-			} else if (key === 'offset') {
-				if (typeof Number(pVal) === 'number') {
-					this.data.offset(Number(pVal));
-				}
 			} else if (key === '$relations' && this.type === 'model') {
-				// let valSplit = pVal.replace('[','').replace(']', '').replace(' ', '').split(',');
-				// for(const val of valSplit) {
-				// 	if (!Object.keys(this.table.relationMappings).includes(val)) {
-				// 		return { status: false, message: `relation ${val} doesn't exist` };
-				// 	}
-				// }
-
 				this.data.withGraphFetched(pVal);
 			} else if (this.type === 'model') {
 				if (key in this.table.column || (this.timestamp && this.timestampColumn.includes(key))) {
