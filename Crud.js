@@ -3,18 +3,23 @@ import { UploadProvider } from '../../../app/Providers/index.js'
 
 class Crud {
   static async create(model, req, option = {}) {
-    const importModel = (await import(`@averoa/models`))[model];
-    let additionalCreate = option.insert ?? {}
+    try {
 
-    if (req.dataFiles !== undefined) {
-      for(const key in req.dataFiles) {
-        let upload = await UploadProvider.upload(req.dataFiles[key], req.routeData)
-        req.dataReq[key] = upload;
+      const importModel = (await import(`@averoa/models`))[model];
+      let additionalCreate = option.insert ?? {}
+  
+      if (req.dataFiles !== undefined) {
+        for(const key in req.dataFiles) {
+          let upload = await UploadProvider.upload(req.dataFiles[key], req.routeData)
+          req.dataReq[key] = upload;
+        }
       }
+  
+      const data = await importModel.query().insert({ ...req.dataReq, ...additionalCreate });
+      return { status: true, data };
+    } catch (e) {
+      return { status: false, message: e.message }
     }
-
-    const data = await importModel.query().insert({ ...req.dataReq, ...additionalCreate });
-    return data;
   }
 
   static async findAll(model, req, option = {}) {
@@ -25,40 +30,55 @@ class Crud {
   }
 
   static async findOne(model, req, option = {}) {
-    const importModel = (await import(`@averoa/models`))[model];
-    const data = importModel.query();
-    if (option.relations) {
-      data.withGraphFetched(option.relations);
+    try {
+
+      const importModel = (await import(`@averoa/models`))[model];
+      const data = importModel.query();
+      if (option.relations) {
+        data.withGraphFetched(option.relations);
+      }
+      let result = await data.findById(req.params.id);
+      return { status: true, data: result };
+    } catch (e) {
+      return { status: false, message: e.message }
     }
-    data.findById(req.params.id);
-    return data;
   }
 
   static async update(model, req, option = {}) {
-    const importModel = (await import(`@averoa/models`))[model];
-    let additionalUpdate = option.update ?? {}
+    try {
 
-    if (req.dataFiles !== undefined) {
-      let oldData = await importModel.query().findById(req.params.id);
-      for(const key in req.dataFiles) {
-        let upload = await UploadProvider.upload(req.dataFiles[key], req.routeData, oldData[key])
-        req.dataReq[key] = upload;
+      const importModel = (await import(`@averoa/models`))[model];
+      let additionalUpdate = option.update ?? {}
+
+      if (req.dataFiles !== undefined) {
+        let oldData = await importModel.query().findById(req.params.id);
+        for (const key in req.dataFiles) {
+          let upload = await UploadProvider.upload(req.dataFiles[key], req.routeData, oldData[key])
+          req.dataReq[key] = upload;
+        }
       }
-    }
 
-    const data = await importModel.query()
-      .findById(req.params.id)
-      .update({ ...req.dataReq, ...additionalUpdate });
-    return { status: !!data };
+      const data = await importModel.query()
+        .findById(req.params.id)
+        .update({ ...req.dataReq, ...additionalUpdate });
+      return { status: !!data };
+    } catch (e) {
+      return { status: false, message: e.message }
+    }
   }
 
   static async delete(model, req, option = {}) {
-    const importModel = (await import(`@averoa/models`))[model];
-    let additionalUpdate = option.update ?? {}
-    const data = await importModel.query()
-      .findById(req.params.id)
-      .update({ deleted_at: moment().format('YYYY-MM-DD, hh:mm:ss'), ...additionalUpdate });
-    return { status: !!data };
+    try {
+
+      const importModel = (await import(`@averoa/models`))[model];
+      let additionalUpdate = option.update ?? {}
+      const data = await importModel.query()
+        .findById(req.params.id)
+        .update({ deleted_at: moment().format('YYYY-MM-DD, hh:mm:ss'), ...additionalUpdate });
+      return { status: !!data };
+    } catch (e) {
+      return { status: false, message: e.message }
+    }
   }
 }
 
