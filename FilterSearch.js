@@ -38,6 +38,9 @@ class FilterSearch {
 		this.type = type;
 		this.filter = req.query;
 		this.data = type === 'model' ? table.query() : table;
+		if (this.filter['$relations']) {
+			this.data.joinRelated(this.filter['$relations'])
+		}
 		this.config = config;
 
 		if (!Object.keys(this.filter).includes('limit')) {
@@ -48,11 +51,13 @@ class FilterSearch {
 		}
 
 		let query = this.exec();
-		let limit = Number(this.filter.limit);
-		let page = Number(this.filter.page);
 		let dataCount = await query.clone().count();
-		let data = await query.limit(limit).offset((page - 1) * limit);
 		let count = dataCount[0]['count(*)'];
+
+		let limit = this.filter.limit == 0 ? count : Number(this.filter.limit)
+		let page = Number(this.filter.page);
+
+		let data = await query.limit(limit).offset((page - 1) * limit);
 		const page_total = limit > count ? 1 : Math.round(count / limit);
 		return {
 			status: true,
@@ -70,10 +75,18 @@ class FilterSearch {
 
 	// filtering params column, only existing column that will be processing 
 	sanitize(k) {
+		k = k.replace(`${this.table.tableName}.`, '')
 		if (this.type === 'model') {
-			if (k in this.table.column || (this.timestamp && this.timestampColumn.includes(k))) {
-				return true;
-			}
+			if (this.filter['$relations']) {
+				let split = k.split('.')
+				if (this.filter['$relations'].includes(split[0])) {
+					console.log('sip');
+					return true;
+				}
+			} 
+				if (k in this.table.column || (this.timestamp && this.timestampColumn.includes(k))) {
+					return true;
+				}
 		} else if (this.config.column.includes(k) || (this.timestamp && this.timestampColumn.includes(k))) {
 			return true;
 		}
