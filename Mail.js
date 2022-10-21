@@ -1,9 +1,7 @@
 import nodemailer from 'nodemailer';
-import { edge } from '@averoa/core';
-import path from 'path';
 import Queue from './Queue.js';
+import View from './View.js';
 import config from './../../../config/mail.js';
-const __dirname = path.resolve();
 
 class Mail {
 	constructor() {
@@ -13,6 +11,7 @@ class Mail {
 		this.v_html = '';
 		this.v_text = '';
 		this.v_additional = {};
+		this.v_attachments = [];
 		this.channel = '';
 		this.transporter = nodemailer.createTransport(config);
 	}
@@ -36,10 +35,9 @@ class Mail {
 	html(view, variable={}) {
 		
 		this.v_html = async()=> {
-			edge.mount(path.join(__dirname, '/resources/views'))
 			let html = view;
 			try {
-				html = await edge.render(view, variable)
+				html = await View.render(view, variable)
 			} catch (e) {}
 			return html;
 		};
@@ -53,6 +51,10 @@ class Mail {
 	additional(opt={}) {
 		this.v_additional = opt;
 		return this
+	}
+	attachments(data=[]) {
+		this.v_attachments = data;
+		return this;
 	}
 	
 	async send() {
@@ -70,6 +72,7 @@ class Mail {
 			subject: this.v_subject,
 			text: this.v_text,
 			html: html,
+			attachments: this.v_attachments,
 			...this.v_additional
 		};
 
