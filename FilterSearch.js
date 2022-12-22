@@ -39,7 +39,7 @@ class FilterSearch {
 		this.filter = req.query;
 		this.data = type === 'model' ? table.query() : table;
 		if (this.filter['$relations']) {
-			this.data.joinRelated(this.filter['$relations'])
+			this.data.leftJoinRelated(this.filter['$relations'])
 		}
 		this.config = config;
 
