@@ -218,7 +218,16 @@ class FilterSearch {
 				if (key in this.table.column || (this.timestamp && this.timestampColumn.includes(key))) {
 					this.data.where(key, pVal);
 				} else {
-					return { status: false, message: `${key} doesn't exist` };
+					if(key.includes(this.table.tableName)) {
+						const split = key.split('.');
+						if(split[1] in this.table.column) {
+							this.data.where(key, pVal);
+						} else {
+							return { status: false, message: `${key} doesn't exist` };
+						}
+					} else {
+						return { status: false, message: `${key} doesn't exist` };
+					}
 				}
 			} else if (this.config.column.includes(key) || (this.timestamp && this.timestampColumn.includes(key))) {
 				this.data.where(key, pVal);
