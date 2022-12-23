@@ -51,14 +51,20 @@ class FilterSearch {
 		}
 
 		let query = this.exec();
-		let dataCount = await query.clone().count();
-		let count = dataCount[0]['count(*)'];
+		let columnList = Object.keys(this.table.column).map((v,i)=>{
+			return `${this.table.tableName}.${v}`
+		});
+		let columnTimestampList = this.timestampColumn.map((v,i)=>{
+			return `${this.table.tableName}.${v}`
+		});
+		let dataCount = await query.clone().countDistinct(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`);
+		let count = dataCount[0][Object.keys(dataCount[0])[0]];
 
 		let limit = this.filter.limit == 0 ? count : Number(this.filter.limit)
 		let page = Number(this.filter.page);
 
-		let data = await query.limit(limit).offset((page - 1) * limit);
-		const page_total = limit > count ? 1 : Math.round(count / limit);
+		let data = await query.limit(limit).offset((page - 1) * limit).distinct(...columnList, ...columnTimestampList);
+		const page_total = limit > count ? 1 : Math.ceil(count / limit);
 		return {
 			status: true,
 			metadata: {
