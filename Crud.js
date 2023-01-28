@@ -76,7 +76,7 @@ class Crud {
       let additionalUpdate = option.update ?? {}
       const data = await importModel.query()
         .findById(req.params.id)
-        .update({ deleted_at: moment().format('YYYY-MM-DD, hh:mm:ss'), ...additionalUpdate });
+        .update({ deleted_at: moment().format('YYYY-MM-DD hh:mm:ss'), ...additionalUpdate });
       return { status: !!data };
     } catch (e) {
       return { status: false, message: e.message }
