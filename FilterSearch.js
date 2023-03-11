@@ -38,6 +38,10 @@ class FilterSearch {
 		this.type = type;
 		this.filter = req.query;
 		this.data = type === 'model' ? table.query() : table;
+		if (this.filter['select']) {
+			let arrSelect = this.filter['select'].replaceAll(' ', '').split(',');
+			this.data.select(arrSelect);
+		}
 		if (this.filter['$relations']) {
 			this.data.leftJoinRelated(this.filter['$relations'])
 		}
