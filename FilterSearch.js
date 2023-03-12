@@ -38,10 +38,7 @@ class FilterSearch {
 		this.type = type;
 		this.filter = req.query;
 		this.data = type === 'model' ? table.query() : table;
-		if (this.filter['select']) {
-			let arrSelect = this.filter['select'].replaceAll(' ', '').split(',');
-			this.data.select(arrSelect);
-		}
+		
 		if (this.filter['$relations']) {
 			this.data.leftJoinRelated(this.filter['$relations'])
 		}
@@ -55,19 +52,20 @@ class FilterSearch {
 		}
 
 		let query = this.exec();
-		let columnList = Object.keys(this.table.column).map((v,i)=>{
-			return `${this.table.tableName}.${v}`
-		});
-		let columnTimestampList = this.timestampColumn.map((v,i)=>{
-			return `${this.table.tableName}.${v}`
-		});
-		let dataCount = await query.clone().countDistinct(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`);
-		let count = dataCount[0][Object.keys(dataCount[0])[0]];
+		// let columnList = Object.keys(this.table.column).map((v,i)=>{
+		// 	return `${this.table.tableName}.${v}`
+		// });
+		// let columnTimestampList = this.timestampColumn.map((v,i)=>{
+		// 	return `${this.table.tableName}.${v}`
+		// });
+		let dataCount = await query.clone().countDistinct(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`, {as: '$count'});
+		let count = dataCount[0]['$count'];
 
 		let limit = this.filter.limit == 0 ? count : Number(this.filter.limit)
 		let page = Number(this.filter.page);
 
-		let data = await query.limit(limit).offset((page - 1) * limit).distinct(...columnList, ...columnTimestampList);
+		let data = await query.limit(limit).offset((page - 1) * limit);
+		// .distinct(...columnList, ...columnTimestampList);
 		const page_total = limit > count ? 1 : Math.ceil(count / limit);
 		return {
 			status: true,
@@ -224,6 +222,9 @@ class FilterSearch {
 				}
 			} else if (key === '$relations' && this.type === 'model') {
 				this.data.withGraphFetched(pVal);
+			} else if (key === '$select') {
+				let arrSelect = pVal.replaceAll(' ', '').split(',');
+				this.data.select(arrSelect);
 			} else if (this.type === 'model') {
 				if (key in this.table.column || (this.timestamp && this.timestampColumn.includes(key))) {
 					this.data.where(key, pVal);
