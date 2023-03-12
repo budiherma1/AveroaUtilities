@@ -39,9 +39,9 @@ class FilterSearch {
 		this.filter = req.query;
 		this.data = type === 'model' ? table.query() : table;
 		
-		if (this.filter['$relations']) {
-			this.data.leftJoinRelated(this.filter['$relations'])
-		}
+		// if (this.filter['$relations']) {
+		// 	this.data.leftJoinRelated(this.filter['$relations'])
+		// }
 		this.config = config;
 
 		if (!Object.keys(this.filter).includes('limit')) {
@@ -58,7 +58,8 @@ class FilterSearch {
 		// let columnTimestampList = this.timestampColumn.map((v,i)=>{
 		// 	return `${this.table.tableName}.${v}`
 		// });
-		let dataCount = await query.clone().countDistinct(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`, {as: '$count'});
+		// let dataCount = await query.clone().countDistinct(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`, {as: '$count'});
+		let dataCount = await query.clone().count(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`, {as: '$count'});
 		let count = dataCount[0]['$count'];
 
 		let limit = this.filter.limit == 0 ? count : Number(this.filter.limit)
