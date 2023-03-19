@@ -96,11 +96,24 @@ class Model extends Objection {
       }
     }
 
-    for (const key in this.column) {
+    let theColumns = this.column;
+    if (this.timestamp !== false) {
+      theColumns = {
+        ...theColumns,
+        created_at: { flag: { required: false } },
+        created_by: { flag: { required: false } },
+        updated_at: { flag: { required: false } },
+        updated_by: { flag: { required: false } },
+        deleted_at: { flag: { required: false } },
+        deleted_by: { flag: { required: false } },
+      }
+    }
 
-      if (additional.create && this.column[key].flag?.required !== false && !data[key] && this.column[key]?.flag?.upload !== true) {
+    for (const key in theColumns) {
+
+      if (additional.create && theColumns[key].flag?.required !== false && !data[key] && theColumns[key]?.flag?.upload !== true) {
         return res.send({ status: false, data: { column: key, message: 'required' } });
-      } else if (this.column[key]?.flag?.upload === true && !(key in dataFiles)) {
+      } else if (theColumns[key]?.flag?.upload === true && !(key in dataFiles)) {
         return res.send({ status: false, data: { column: key, message: 'required' } });
       }
 
@@ -108,9 +121,9 @@ class Model extends Objection {
         const vColumn = [];
         sanitized[key] = data[key];
 
-        const allValidation = typeof this.column[key].validation === 'object' ? this.column[key].validation : [];
+        const allValidation = typeof theColumns[key].validation === 'object' ? theColumns[key].validation : [];
 
-        if (this.column[key].flag?.unique == true) {
+        if (theColumns[key].flag?.unique == true) {
           let initModel = this.query();
           initModel.where(key, '=', data[key]);
           if (!additional.create) {
