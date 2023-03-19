@@ -146,6 +146,7 @@ class Model extends Objection {
     if (validationResult.length) {
       return res.send(result);
     }
+    req.bodyRaw = { ...req.body };
     req.body = sanitized;
     if (Object.keys(dataFiles).length > 0) {
       req.dataFiles = dataFiles;
@@ -239,7 +240,7 @@ class Model extends Objection {
     return query;
   }
 
-    // static async validationRouter(req, res, next, additional = {}) {
+  // static async validationRouter(req, res, next, additional = {}) {
   //   const validationResult = [];
   //   const data = req.body;
   //   const sanitized = {}
@@ -249,7 +250,7 @@ class Model extends Objection {
   //   console.log(req.files);
   //   console.log(req.file);
   //   //
-    
+
   //     console.log(2222);
   //     for (const col in this.column) {
   //       // 
@@ -280,14 +281,14 @@ class Model extends Objection {
   //     if (key in this.column) {
   //       const vColumn = [];
 
-        
+
   //       if (!additional.create) {
   //         if (this.column[key].flag?.required !== false && !data[key]) {
   //           vColumn.push('required');
   //         }
   //       }
 
-        
+
   //       const allValidation = typeof this.column[key].validation === 'object' ? this.column[key].validation : [];
 
   //       if (allValidation.length || this.column[key].flag?.unique == true) {
