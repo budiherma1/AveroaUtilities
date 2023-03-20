@@ -7,15 +7,15 @@ class Crud {
 
       const importModel = (await import(`@averoa/models`))[model];
       let additionalCreate = option.insert ?? {}
-  
+
       let dataReq = req.dataReq ?? req.body;
       if (req.dataFiles !== undefined) {
-        for(const key in req.dataFiles) {
+        for (const key in req.dataFiles) {
           let upload = await UploadProvider.upload(req.dataFiles[key], req.routeData)
           dataReq[key] = upload;
         }
       }
-      
+
       const data = await importModel.query().insert({ ...dataReq, ...additionalCreate });
       return { status: true, data };
     } catch (e) {
@@ -35,9 +35,15 @@ class Crud {
 
       const importModel = (await import(`@averoa/models`))[model];
       const data = importModel.query();
-      if (option.relations) {
-        data.withGraphFetched(option.relations);
+
+      if (req.query?.$relations) {
+        data.withGraphFetched(req.query.$relations);
       }
+      if (req.query?.$select) {
+        let arrSelect = req.query.$select.replaceAll(' ', '').split(',');
+        data.select(arrSelect);
+      }
+
       let result = await data.findById(req.params.id);
       return { status: true, data: result };
     } catch (e) {
