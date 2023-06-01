@@ -38,7 +38,7 @@ class FilterSearch {
 		this.type = type;
 		this.filter = req.query;
 		this.data = type === 'model' ? table.query() : table;
-		
+
 		// if (this.filter['$relations']) {
 		// 	this.data.leftJoinRelated(this.filter['$relations'])
 		// }
@@ -59,7 +59,7 @@ class FilterSearch {
 		// 	return `${this.table.tableName}.${v}`
 		// });
 		// let dataCount = await query.clone().countDistinct(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`, {as: '$count'});
-		let dataCount = await query.clone().count(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`, {as: '$count'});
+		let dataCount = await query.clone().count(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`, { as: '$count' });
 		let count = dataCount[0]['$count'];
 
 		let limit = this.filter.limit == 0 ? count : Number(this.filter.limit)
@@ -92,10 +92,10 @@ class FilterSearch {
 					console.log('sip');
 					return true;
 				}
-			} 
-				if (k in this.table.column || (this.timestamp && this.timestampColumn.includes(k))) {
-					return true;
-				}
+			}
+			if (k in this.table.column || (this.timestamp && this.timestampColumn.includes(k))) {
+				return true;
+			}
 		} else if (this.config.column.includes(k) || (this.timestamp && this.timestampColumn.includes(k))) {
 			return true;
 		}
@@ -224,15 +224,19 @@ class FilterSearch {
 			} else if (key === '$relations' && this.type === 'model') {
 				this.data.withGraphFetched(pVal);
 			} else if (key === '$select') {
-				let arrSelect = pVal.replaceAll(' ', '').split(',');
-				this.data.select(arrSelect);
+				if (Array.isArray(pVal)) {
+					this.data.select(pVal);
+				} else if (typeof pVal == 'string') {
+					let arrSelect = pVal.replaceAll(' ', '').split(',');
+					this.data.select(arrSelect);
+				}
 			} else if (this.type === 'model') {
 				if (key in this.table.column || (this.timestamp && this.timestampColumn.includes(key))) {
 					this.data.where(key, pVal);
 				} else {
-					if(key.includes(this.table.tableName)) {
+					if (key.includes(this.table.tableName)) {
 						const split = key.split('.');
-						if(split[1] in this.table.column) {
+						if (split[1] in this.table.column) {
 							this.data.where(key, pVal);
 						} else {
 							return { status: false, message: `${key} doesn't exist` };

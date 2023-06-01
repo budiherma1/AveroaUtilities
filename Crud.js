@@ -26,7 +26,24 @@ class Crud {
   static async findAll(model, req, option = {}) {
     const importModel = (await import(`@averoa/models`))[model];
     // const data = await FilterSearch.knex(DB('teacher'), req);
+    let isDatatable = req.query?.['$datatable'] ? true : false;
+    let datatableDraw = req.query?.['$draw'];
+    if (isDatatable) {
+      delete req.query['$draw'];
+      delete req.query['$datatable'];
+      delete req.query['_'];
+    }
     const data = await importModel.filterSearch.call(importModel, req);
+
+    if (isDatatable && data.status) {
+      return {
+        draw: datatableDraw,
+        recordsTotal: data.metadata?.item_total ?? 0,
+        recordsFiltered: data.metadata?.item_total ?? 0,
+        data: data.data,
+      }
+    }
+
     return data;
   }
 
