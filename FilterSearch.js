@@ -29,19 +29,17 @@ class FilterSearch {
 	async init(type, table, req, config) {
 		this.timestampColumn = ['created_at', 'created_by', 'updated_at', 'updated_by', 'deleted_at', 'deleted_by'];
 		this.pagination = ['limit', 'page'];
+
 		if (type === 'model') {
 			this.timestamp = table.timestamp
 		} else {
 			this.timestamp = config.timestamp ? true : false;
 		}
+
 		this.table = table;
 		this.type = type;
 		this.filter = req.query;
 		this.data = type === 'model' ? table.query() : table;
-
-		// if (this.filter['$relations']) {
-		// 	this.data.leftJoinRelated(this.filter['$relations'])
-		// }
 		this.config = config;
 
 		if (!Object.keys(this.filter).includes('limit')) {
@@ -52,21 +50,27 @@ class FilterSearch {
 		}
 
 		let query = this.exec();
-		// let columnList = Object.keys(this.table.column).map((v,i)=>{
-		// 	return `${this.table.tableName}.${v}`
-		// });
-		// let columnTimestampList = this.timestampColumn.map((v,i)=>{
-		// 	return `${this.table.tableName}.${v}`
-		// });
-		// let dataCount = await query.clone().countDistinct(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`, {as: '$count'});
-		let dataCount = await query.clone().count(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`, { as: '$count' });
-		let count = dataCount[0]['$count'];
 
-		let limit = this.filter.limit == 0 ? count : Number(this.filter.limit)
-		let page = Number(this.filter.page);
+		let count = 0;
+		let limit = 0;
+		let page = 1;
+		let data = [];
+		if (this.filter['$relations-type'] == 'join') {
+			let dataCount = await query.clone().countDistinct(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`, { as: '$count' });
+			count = dataCount[0]['$count'];
 
-		let data = await query.limit(limit).offset((page - 1) * limit);
-		// .distinct(...columnList, ...columnTimestampList);
+			limit = this.filter.limit == 0 ? count : Number(this.filter.limit)
+			page = Number(this.filter.page);
+			data = await query.groupBy(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`).limit(limit).offset((page - 1) * limit);
+		} else {
+			let dataCount = await query.clone().count(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`, { as: '$count' });
+			count = dataCount[0]['$count'];
+
+			limit = this.filter.limit == 0 ? count : Number(this.filter.limit)
+			page = Number(this.filter.page);
+			data = await query.limit(limit).offset((page - 1) * limit);
+		}
+
 		const page_total = limit > count ? 1 : Math.ceil(count / limit);
 		return {
 			status: true,
@@ -222,7 +226,11 @@ class FilterSearch {
 					this.data.groupBy(pVal);
 				}
 			} else if (key === '$relations' && this.type === 'model') {
-				this.data.withGraphFetched(pVal);
+				if (this.filter['$relations-type'] == 'join') {
+					this.data.withGraphJoined(pVal);
+				} else {
+					this.data.withGraphFetched(pVal);
+				}
 			} else if (key === '$select') {
 				if (Array.isArray(pVal)) {
 					this.data.select(pVal);
