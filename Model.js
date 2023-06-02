@@ -111,7 +111,7 @@ class Model extends Objection {
 
     for (const key in theColumns) {
 
-      if (additional.create && theColumns[key].flag?.required !== false && !data[key] && theColumns[key]?.flag?.upload !== true) {
+      if (additional.create && theColumns[key].flag?.required !== false && (data[key] === '' || data[key] === undefined) && theColumns[key]?.flag?.upload !== true) {
         return res.send({ status: false, data: { column: key, message: 'required' } });
       } else if (theColumns[key]?.flag?.upload === true && !(key in dataFiles)) {
         return res.send({ status: false, data: { column: key, message: 'required' } });
@@ -200,7 +200,7 @@ class Model extends Objection {
     //
     if (type === 'create') {
       for (const col in this.column) {
-        if (this.column[col].flag?.required !== false && !request[col]) {
+        if (this.column[col].flag?.required !== false && (request[col] === '' || request[col] === undefined)) {
           return { status: false, data: { column: col, message: 'required' } };
         }
       }
