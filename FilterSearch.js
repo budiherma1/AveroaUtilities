@@ -139,6 +139,9 @@ class FilterSearch {
 			if (this.pagination.includes(key)) {
 				continue;
 			}
+			if (key == '$relations-type') {
+				continue;
+			}
 
 			if (key.split(':')[1] === 'eq') {
 				this.filterProcess(':eq', key, (builder, col) => {
