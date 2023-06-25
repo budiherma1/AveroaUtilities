@@ -16,7 +16,12 @@ class Crud {
         }
       }
 
-      const data = await importModel.query().insert({ ...dataReq, ...additionalCreate });
+      let dataFromJwt = {}
+      if (req.user) {
+        dataFromJwt = { created_by: req.user.id, updated_by: req.user.id }
+      }
+
+      const data = await importModel.query().insert({ ...dataReq, ...dataFromJwt, ...additionalCreate });
       return { status: true, data };
     } catch (e) {
       return { status: false, message: e.message }
@@ -83,9 +88,14 @@ class Crud {
         }
       }
 
+      let dataFromJwt = {}
+      if (req.user) {
+        dataFromJwt = { created_by: req.user.id, updated_by: req.user.id }
+      }
+
       const data = await importModel.query()
         .findById(req.params.id)
-        .update({ ...dataReq, ...additionalUpdate });
+        .update({ ...dataReq, ...dataFromJwt, ...additionalUpdate });
       return { status: !!data };
     } catch (e) {
       return { status: false, message: e.message }
