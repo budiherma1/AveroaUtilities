@@ -10,7 +10,7 @@ import winston from 'winston';
 const logger = winston.createLogger({
 	format: winston.format.json(),
 	transports: [
-		new winston.transports.File({ filename: './storages/logs/averoa.log' }),
+		new winston.transports.File({ filename: path.join(path.resolve(), '/storages/logs/averoa.log') }),
 	],
 })
 
