@@ -6,6 +6,7 @@
 // debug: 5,
 // silly: 6
 import winston from 'winston';
+import path from 'path';
 
 const logger = winston.createLogger({
 	format: winston.format.json(),
