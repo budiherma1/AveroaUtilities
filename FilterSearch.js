@@ -241,6 +241,20 @@ class FilterSearch {
 					let arrSelect = pVal.replaceAll(' ', '').split(',');
 					this.data.select(arrSelect);
 				}
+			} else if (key.split(':')[1] === 'search') {
+				this.filterProcess(':search', key, (builder, col) => {
+					let arrSearch = pVal.split(' ');
+					for (let v of arrSearch) {
+						builder.orWhere(col, 'like', v);
+					}
+				}, (col) => {
+					let arrSearch = pVal.split(' ');
+					this.data.where((builder) => {
+						for (let v of arrSearch) {
+							builder.orWhere(col, 'like', v);
+						}
+					});
+				});
 			} else if (this.type === 'model') {
 				if (key in this.table.column || (this.timestamp && this.timestampColumn.includes(key))) {
 					this.data.where(key, pVal);
