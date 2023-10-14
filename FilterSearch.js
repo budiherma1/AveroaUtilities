@@ -245,13 +245,13 @@ class FilterSearch {
 				this.filterProcess(':search', key, (builder, col) => {
 					let arrSearch = pVal.split(' ');
 					for (let v of arrSearch) {
-						builder.orWhere(col, 'like', v);
+						builder.orWhere(col, 'like', `%${v}%`);
 					}
 				}, (col) => {
 					let arrSearch = pVal.split(' ');
 					this.data.where((builder) => {
 						for (let v of arrSearch) {
-							builder.orWhere(col, 'like', v);
+							builder.orWhere(col, 'like', `%${v}%`);
 						}
 					});
 				});
