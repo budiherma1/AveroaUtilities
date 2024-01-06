@@ -8,10 +8,16 @@
 import winston from 'winston';
 import path from 'path';
 
+let __dirname = path.resolve()
+
+if (__dirname.includes('/node_modules/@averoa/core')) {
+	__dirname = __dirname.replace('/node_modules/@averoa/core', '')
+}
+let filename = path.join(__dirname, '/storages/logs/averoa.log')
 const logger = winston.createLogger({
 	format: winston.format.json(),
 	transports: [
-		new winston.transports.File({ filename: path.join(path.resolve(), '/storages/logs/averoa.log') }),
+		new winston.transports.File({ filename }),
 	],
 })
 
