@@ -59,7 +59,7 @@ class Model extends Objection {
     await knex(this.tableName).del();
     const data = [];
 
-    Objection.knex(Knex(config));
+    Objection.knex(Knex(config(process)));
 
     for (let i = 1; i <= number; i++) {
       const seeds = {};
