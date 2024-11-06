@@ -3,7 +3,7 @@ import config from './../../../config/queue.js';
 
 export default async (channel, data) => {
 	const queue = channel;
-	const conn = await amqplib.connect(config.amqp);
+	const conn = await amqplib.connect(config.amqp, { heartbeat: config.heartbeat || 5 });
 
 	const ch1 = await conn.createChannel();
 	await ch1.assertQueue(queue);
