@@ -2,7 +2,7 @@ import moment from 'moment';
 import { UploadProvider } from '../../../app/Providers/index.js'
 
 class Crud {
-  static async create(model, req, option = {}) {
+  static async create(model, req, option = {}, trx = null) {
     try {
 
       const importModel = (await import(`@averoa/models`))[model];
@@ -21,7 +21,7 @@ class Crud {
         dataFromJwt = { created_by: req.user.id, updated_by: req.user.id }
       }
 
-      const data = await importModel.query().insert({ ...dataReq, ...dataFromJwt, ...additionalCreate });
+      const data = await importModel.query(trx).insert({ ...dataReq, ...dataFromJwt, ...additionalCreate });
       return { status: true, data };
     } catch (e) {
       return { status: false, message: e.message }
@@ -73,7 +73,7 @@ class Crud {
     }
   }
 
-  static async update(model, req, option = {}) {
+  static async update(model, req, option = {}, trx = null) {
     try {
 
       const importModel = (await import(`@averoa/models`))[model];
@@ -81,7 +81,7 @@ class Crud {
 
       let dataReq = req.dataReq ?? req.body;
       if (req.dataFiles !== undefined) {
-        let oldData = await importModel.query().findById(req.params.id);
+        let oldData = await importModel.query(trx).findById(req.params.id);
         for (const key in req.dataFiles) {
           let upload = await UploadProvider.upload(req.dataFiles[key], req.routeData, oldData[key])
           dataReq[key] = upload;
@@ -93,7 +93,7 @@ class Crud {
         dataFromJwt = { created_by: req.user.id, updated_by: req.user.id }
       }
 
-      const data = await importModel.query()
+      const data = await importModel.query(trx)
         .findById(req.params.id)
         .update({ ...dataReq, ...dataFromJwt, ...additionalUpdate });
       return { status: !!data };
@@ -102,12 +102,12 @@ class Crud {
     }
   }
 
-  static async delete(model, req, option = {}) {
+  static async delete(model, req, option = {}, trx = null) {
     try {
 
       const importModel = (await import(`@averoa/models`))[model];
       let additionalUpdate = option.update ?? {}
-      const data = await importModel.query()
+      const data = await importModel.query(trx)
         .findById(req.params.id)
         .update({ deleted_at: moment().format('YYYY-MM-DD hh:mm:ss'), ...additionalUpdate });
       return { status: !!data };
