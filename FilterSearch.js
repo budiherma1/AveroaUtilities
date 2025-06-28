@@ -41,6 +41,7 @@ class FilterSearch {
 		this.filter = req.query;
 		this.data = type === 'model' ? table.query() : table;
 		this.config = config;
+		this.relations = { status: false, type: '', value: '' };
 
 		if (!Object.keys(this.filter).includes('limit')) {
 			this.filter.limit = this.config.limit ?? 10;
@@ -61,14 +62,26 @@ class FilterSearch {
 
 			limit = this.filter.limit == 0 ? count : Number(this.filter.limit)
 			page = Number(this.filter.page);
-			data = await query.groupBy(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`).limit(limit).offset((page - 1) * limit);
+			data = query.groupBy(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`).limit(limit).offset((page - 1) * limit);
+
+			if (this.relations.status) {
+				data = data.withGraphJoined(this.relations.value);
+			}
+
+			data = await data;
 		} else {
 			let dataCount = await query.clone().count(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`, { as: '$count' });
 			count = dataCount[0]['$count'];
 
 			limit = this.filter.limit == 0 ? count : Number(this.filter.limit)
 			page = Number(this.filter.page);
-			data = await query.limit(limit).offset((page - 1) * limit);
+			data = query.limit(limit).offset((page - 1) * limit);
+
+			if (this.relations.status) {
+				data = data.withGraphFetched(this.relations.value);
+			}
+
+			data = await data;
 		}
 
 		const page_total = limit > count ? 1 : Math.ceil(count / limit);
@@ -230,9 +243,9 @@ class FilterSearch {
 				}
 			} else if (key === '$relations' && this.type === 'model') {
 				if (this.filter['$relations-type'] == 'join') {
-					this.data.withGraphJoined(pVal);
+					this.relations = { status: true, type: 'join', value: pVal };
 				} else {
-					this.data.withGraphFetched(pVal);
+					this.relations = { status: true, type: 'fetch', value: pVal };
 				}
 			} else if (key === '$select') {
 				if (Array.isArray(pVal)) {
