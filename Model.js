@@ -13,11 +13,17 @@ class Model extends Objection {
           this.column[key].migration({ table, knex, column: key });
         }
       }
-
+      const configDB = config(process);
       if (this.timestamp !== false) {
         table.timestamp('created_at').defaultTo(knex.fn.now());
         table.bigint('created_by', 14).nullable();
-        table.timestamp('updated_at').defaultTo(knex.raw('CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP')).nullable();
+
+        if (configDB?.client == 'pg') {
+          table.timestamp('updated_at').defaultTo(knex.fn.now()).nullable();
+        } else {
+          table.timestamp('updated_at').defaultTo(knex.raw('CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP')).nullable();
+        }
+
         table.bigint('updated_by', 14).nullable();
         table.timestamp('deleted_at').nullable();
         table.bigint('deleted_by', 14).nullable();
