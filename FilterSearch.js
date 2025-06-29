@@ -42,6 +42,7 @@ class FilterSearch {
 		this.data = type === 'model' ? table.query() : table;
 		this.config = config;
 		this.relations = { status: false, type: '', value: '' };
+		this.orderBy = { status: false, type: '', value: '' };
 
 		if (!Object.keys(this.filter).includes('limit')) {
 			this.filter.limit = this.config.limit ?? 10;
@@ -67,7 +68,9 @@ class FilterSearch {
 			if (this.relations.status) {
 				data = data.withGraphJoined(this.relations.value);
 			}
-
+			if (this.orderBy.status) {
+				data = data.orderBy(this.orderBy.value, this.orderBy.type);
+			}
 			data = await data;
 		} else {
 			let dataCount = await query.clone().count(`${this.table.tableName}.${Object.keys(this.table.column)[0]}`, { as: '$count' });
@@ -79,6 +82,9 @@ class FilterSearch {
 
 			if (this.relations.status) {
 				data = data.withGraphFetched(this.relations.value);
+			}
+			if (this.orderBy.status) {
+				data = data.orderBy(this.orderBy.value, this.orderBy.type);
 			}
 
 			data = await data;
@@ -231,11 +237,11 @@ class FilterSearch {
 				});
 			} else if (key === 'orderBy') {
 				if (this.sanitize(pVal)) {
-					this.data.orderBy(pVal);
+					this.orderBy = { status: true, type: 'asc', value: pVal };
 				}
 			} else if (key === 'orderByDesc') {
 				if (this.sanitize(pVal)) {
-					this.data.orderBy(pVal, 'desc');
+					this.orderBy = { status: true, type: 'desc', value: pVal };
 				}
 			} else if (key === 'groupBy') {
 				if (this.sanitize(pVal)) {
