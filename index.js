@@ -12,3 +12,6 @@ export { default as View } from './View.js';
 export {
   appRoot, appPath, appHas, importApp, importAppDefault, resetAppRoot,
 } from './paths.js';
+export {
+  default as Gate, AccessGate, AuthorizationError, GateResponse, can,
+} from './Gate.js';
