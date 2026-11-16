@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Background jobs.** `Job` base class (`static queue`, `tries`, `backoff`, `timeout`, `jobName`; `handle(payload,
+  context)`, optional `failed(payload, error, context)`), `MyJob.dispatch(payload, { delay, queue })` on the shared
+  AMQP connection and confirm channel of `Queue`, `MyJob.dispatchSync(payload)` (in-process, no broker),
+  `exponentialBackoff()`, `JobTimeoutError` and `fakeJobs()` for tests.
+- **Delayed jobs without a broker plugin**: per-delay TTL queues (`<queue>.delay.<ms>`) that dead-letter into the job
+  queue and expire when unused.
+- **`startJobWorker({ jobs, queues, concurrency, tries, backoff, timeout })`**: runs jobs registered by name (passed in
+  or discovered from `app/Jobs/index.js`), with retries and backoff, per-attempt timeouts (`context.signal` is
+  aborted), a failed-jobs queue (`<queue>.failed`), graceful `stop()` and reconnect with exponential backoff.
+  `retryFailedJobs({ queue, limit })` re-queues failed jobs.
+- **Scheduler.** `Schedule` (`job()`, `call()`, `cron()`, `everyMinute()` ... `dailyAt()`, `weeklyOn()`, `monthlyOn()`,
+  `timezone()`, `withoutOverlapping()`, `name()`), `startScheduler({ schedule, timezone, lock })` (default schedule:
+  `app/Console/Kernel.js`) and `runScheduleOnce()` for system cron / Kubernetes CronJobs.
+- New optional peer dependency `croner` ^10 (cron parsing, only loaded by the scheduler).
+- New env vars: `JOBS_QUEUE` (default job queue, also `config/queue.js` `jobsQueue`), `SCHEDULE_TIMEZONE`.
+
 ## 2.0.2
 
 ### Fixed
