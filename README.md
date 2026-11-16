@@ -29,6 +29,7 @@
 - [Queue](#queue)
 - [View, Log, Fetch and Validator](#view-log-fetch-and-validator)
 - [AuthSandbox](#authsandbox)
+- [Authorization (Gate)](#authorization-gate)
 - [Path helpers](#path-helpers)
 - [Configuration](#configuration)
 - [Security notes](#security-notes)
@@ -186,6 +187,7 @@ import {
   validate, describeValidation, isStandardSchema, VALIDATE,
   createLogger, logSettings, logFormat, redact, REDACTED,
   requestContext, runWithContext, getContext, getRequestId, addLogContext,
+  Gate, AccessGate, GateResponse, AuthorizationError, can,
   appRoot, appPath, appHas, importApp, importAppDefault, resetAppRoot,
 } from '@averoa/utilities';
 
@@ -220,6 +222,11 @@ import Auth from '@averoa/utilities/AuthSandbox.js';        // per-request auth 
 | `describeValidation(fn)` | JSON Schema of the sections a `validate()` middleware checks (used for OpenAPI generation), or `null`. |
 | `isStandardSchema(value)` | `true` for an object implementing [Standard Schema v1](https://standardschema.dev) (`~standard`). |
 | `VALIDATE` | `Symbol.for('averoa.validate')`, the property holding `{ schemas, options }` on a `validate()` middleware. |
+| `Gate` | The application's authorization gate (an `AccessGate`): abilities, model policies, `allows` / `denies` / `authorize`. |
+| `AccessGate` | The gate class, for an isolated gate (tests, multi-tenant setups). |
+| `GateResponse` | Optional result of an ability or policy method: `allow()`, `deny(message, statusCode)`, `denyAsNotFound()`. |
+| `AuthorizationError` | Thrown by `authorize()`: `statusCode` 403 (or the denial's own), `expose: true`. |
+| `can(ability, resource?, options?)` | Express middleware: 401 without a user, 403 when denied, 404 when the resource loader finds nothing. |
 | `appRoot`, `appPath`, `appHas`, `importApp`, `importAppDefault`, `resetAppRoot` | App-root helpers, also available from `@averoa/utilities/paths`. |
 
 The `exports` map also allows deep imports of any module file (`@averoa/utilities/<File>.js`). Named exports that
@@ -1021,6 +1028,151 @@ await auth.logout();
 | `check()` | `req.isAuthenticated()`, or `false` when passport is not set up |
 | `logout()` | Promise that resolves once `req.logOut()` has finished (passport >= 0.6 callback style) |
 
+## Authorization (Gate)
+
+`Gate` decides whether a user may perform an action, in the spirit of Laravel's gates and policies. It is plain
+JavaScript: it does not know how users are authenticated, it only needs the user object (usually `req.user`).
+
+### Abilities
+
+```js
+import { Gate } from '@averoa/utilities';
+
+Gate.define('view-reports', (user) => user.is_admin === true);
+Gate.define('edit-settings', async (user, team) => team.owner_id === user.id);
+
+await Gate.allows(req.user, 'view-reports');        // true | false
+await Gate.denies(req.user, 'edit-settings', team); // extra arguments reach the callback
+```
+
+### Policies
+
+A policy groups the abilities of one model. Register it for the model class; checks that receive an instance (or the
+class itself, for `create`) are dispatched to the method named after the ability:
+
+```js
+// app/Policies/PostPolicy.js
+export default class PostPolicy {
+  // optional: runs first, a non-undefined result decides (e.g. an admin bypass)
+  before(user, ability) {
+    if (user.is_admin) return true;
+    return undefined;
+  }
+
+  view() { return true; }
+
+  create(user) { return user.email_verified_at != null; }
+
+  update(user, post) { return post.user_id === user.id; }
+
+  delete(user, post) { return post.user_id === user.id; }
+}
+```
+
+```js
+import { Gate } from '@averoa/utilities';
+import { Posts } from '#models';
+import PostPolicy from '#app/Policies/PostPolicy.js';
+
+Gate.policy(Posts, PostPolicy);  // a class (instantiated once) or a plain object
+
+await Gate.allows(req.user, 'update', post);   // PostPolicy#update(user, post)
+await Gate.allows(req.user, 'create', Posts);  // PostPolicy#create(user, Posts)
+```
+
+Subclasses of a registered model use its policy. When the policy has no method for an ability, a `define()`d ability
+of the same name is used; when there is neither, the check is denied.
+
+### Checking
+
+| Method | Result |
+| --- | --- |
+| `allows(user, ability, ...args)` | `Promise<boolean>` |
+| `denies(user, ability, ...args)` | `Promise<boolean>` |
+| `check(user, [abilities], ...args)` | `true` when every ability is allowed |
+| `any(user, [abilities], ...args)` | `true` when at least one ability is allowed |
+| `inspect(user, ability, ...args)` | the `GateResponse` (`allowed`, `message`, `statusCode`) |
+| `authorize(user, ability, ...args)` | resolves the `GateResponse`, or rejects with an `AuthorizationError` |
+| `forUser(user)` | the same methods bound to one user: `Gate.forUser(req.user).allows('update', post)` |
+
+`authorize()` throws an `AuthorizationError` with `statusCode`/`status` 403 and `expose: true`, so it follows the
+package's error conventions: `@averoa/core`'s error handler answers `403 { status: false, message }`, and
+`errorResult(err)` (see [Error results](#error-results)) gives `{ status: false, message, statusCode: 403 }`.
+
+```js
+async update(req, res) {
+  const post = await Posts.query().findById(req.params.id);
+  await Gate.authorize(req.user, 'update', post); // 403 for anyone but the author
+  // ...
+}
+```
+
+Callbacks and policy methods may return a `GateResponse` instead of a boolean to give a reason or another status:
+
+```js
+import { GateResponse } from '@averoa/utilities';
+
+export default class PostPolicy {
+  delete(user, post) {
+    if (post.user_id === user.id) return true;
+    return GateResponse.deny('Only the author can delete this post'); // 403 with this message
+    // GateResponse.denyAsNotFound() -> 404, hides that the post exists
+  }
+}
+```
+
+### Global callbacks
+
+```js
+Gate.before((user, ability, ...args) => (user?.is_super_admin ? true : undefined)); // first non-undefined decides
+Gate.after((user, ability, response, ...args) => audit(user, ability, response.allowed)); // return value ignored
+```
+
+`before` callbacks run for every check, also for guests (`user` is `null`).
+
+### Middleware
+
+`can(ability, resource?, options?)` builds an Express middleware for route middleware arrays
+([`@averoa/routes`](https://github.com/budiherma1/AveroaRoute) accepts functions next to middleware names). Put it
+after the middleware that authenticates the request:
+
+```js
+import Router from '@averoa/routes';
+import { can } from '@averoa/utilities';
+import { Posts } from '#models';
+
+const findPost = (req) => Posts.query().findById(req.params.id).whereNull('deleted_at');
+
+router.get('/reports', 'ReportController@index', ['AuthMiddleware', can('view-reports')]);
+router.post('/posts', 'PostController@create', ['AuthMiddleware', can('create', Posts)]);
+router.put('/posts/:id', 'PostController@update', ['AuthMiddleware', can('update', findPost)]);
+```
+
+| Situation | Response |
+| --- | --- |
+| No user (`req.user` empty) | `401 { status: false, message: 'Unauthenticated' }` |
+| The loader returns `null` / `undefined` | `404 { status: false, message: 'Not Found' }` |
+| Denied | `403 { status: false, message }` (or the `GateResponse`'s status, message and `code`) |
+| Allowed | `next()`; the resource is kept on `res.locals.resource` |
+| The loader or a callback throws | `next(err)` |
+
+`resource` is a model class (passed as is), a loader function `(req, res) => resource | Promise<resource>` (an array
+result is spread into several arguments), or any other value (passed as is). Options:
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `gate` | the `Gate` singleton | Another `AccessGate`. |
+| `user` | `(req) => req.user` | Where the user comes from. |
+| `notFoundMessage` | `'Not Found'` | Message of the 404 answer. |
+
+### Defaults
+
+Every check fails closed: unknown abilities, missing policy methods and callbacks that return anything but `true` (or
+an allowing `GateResponse`) deny. Guests (`user` `null` or `undefined`) are denied without calling the ability, unless
+it was defined with `Gate.define(name, callback, { guests: true })`, or the policy sets `allowGuests = true` (static or
+instance property). Errors thrown by callbacks are not swallowed. `Gate.reset()` removes every ability, policy and
+callback (useful in tests); `new AccessGate()` gives an isolated gate.
+
 ## Path helpers
 
 ```js
@@ -1102,6 +1254,8 @@ only used when the matching `config/*.js` file does not exist or exports nothing
 - **Result size.** `limit` is capped by `maxLimit` (default 1000), including `limit=0`.
 - **Soft-deleted data** is not readable or writable through `Crud`/`FilterSearch` unless the model opts into
   `$withTrashed`.
+- **Authorization** fails closed: `Gate` denies unknown abilities, missing policy methods, guests and any callback
+  result other than `true`.
 - **Relations** are limited to `static allowGraph`; deeper graphs, recursion and modifiers must be allowed
   explicitly.
 

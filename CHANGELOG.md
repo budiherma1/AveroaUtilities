@@ -4,6 +4,16 @@
 
 ### Added
 
+- Authorization: `Gate` (the application's `AccessGate`) with `define(ability, callback)`, `policy(ModelClass,
+  Policy)` (policy methods named after abilities plus an optional `before(user, ability)`), global `before` / `after`
+  callbacks, and `allows` / `denies` / `check` / `any` / `inspect` / `authorize` / `forUser`. Checks fail closed
+  (unknown abilities, missing policy methods, guests and non-`true` results deny). `authorize()` throws an
+  `AuthorizationError` (`statusCode` 403, `expose: true`), so `errorResult()` and `@averoa/core`'s error handler
+  answer 403. Callbacks may return a `GateResponse` (`allow()`, `deny(message, statusCode)`, `denyAsNotFound()`).
+- `can(ability, resource?, options?)`: Express middleware for route middleware arrays. 401 JSON without a user, 404
+  JSON when the resource loader finds nothing, 403 JSON (or the denial's status) when denied; the resource is kept on
+  `res.locals.resource`.
+- New root exports: `Gate`, `AccessGate`, `GateResponse`, `AuthorizationError`, `can`.
 - **`validate(schemas, options?)`**: Express middleware that validates `body`, `query`, `params` and `headers` of
   routes that are not crud routes. Each section is a Standard Schema v1 validator (zod, valibot, arktype, ...) or an
   object of field definitions in the Model column style (`type`, `required`, `default`, `enum`,

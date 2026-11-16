@@ -21,3 +21,6 @@ export {
 export {
   default as validate, describeValidation, isStandardSchema, VALIDATE,
 } from './Validate.js';
+export {
+  default as Gate, AccessGate, AuthorizationError, GateResponse, can,
+} from './Gate.js';
