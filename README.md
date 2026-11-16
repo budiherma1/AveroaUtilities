@@ -983,7 +983,7 @@ await SendInvoiceJob.dispatchSync({ invoiceId: 7 });                            
 | --- | --- | --- |
 | `jobName` | the class name | Name the job is published and registered under. Must be unique per worker. Set it if your build minifies class names. |
 | `queue` | `config/queue.js` `jobsQueue`, env `JOBS_QUEUE`, `'jobs'` | Queue name: letters, digits, `_ . : -`, at most 200 characters, not `amq.*`. |
-| `tries` | worker `tries`, else `1` | Total attempts, including the first. |
+| `tries` | worker `tries`, else `1` | Total attempts, including the first; at most 100. |
 | `backoff` | worker `backoff`, else `0` | Wait before a retry, in ms: a number, an array with one entry per retry (the last one repeats) or a function `(retry) => ms`. `exponentialBackoff(base, max)` returns `base`, `2 × base`, `4 × base`, ... capped at `max`. |
 | `timeout` | worker `timeout`, else none | Maximum run time of one attempt, in ms. |
 
@@ -1225,11 +1225,13 @@ they are different versions or installed twice. Explicit meta wins over context 
 **Redaction.** Before a line is written, the values of sensitive keys are replaced with `[REDACTED]`, at any depth
 and in arrays, without changing the object you passed. Keys are compared case-insensitively with everything but
 letters and digits removed (`X-Api-Key` → `xapikey`). A key is sensitive when it contains `authorization`, `cookie`,
-`password`, `passwd`, `passphrase`, `secret`, `token`, `apikey`, `privatekey`, `credential`, `sessionid` or `csrf`;
+`password`, `passwd`, `passphrase`, `secret`, `token`, `apikey`, `accesskey`, `privatekey`, `credential`, `sessionid` or `csrf`;
 is `pass`, `pwd`, `jwt`, `otp`, `auth` or `sid`; or ends with `pass` or `pwd` (`DB_PASS`). `LOG_REDACT` adds keys
-(comma separated, matched the same way: `LOG_REDACT=ssn,iban`). `Bearer` / `Basic` credentials inside strings
-(messages, stacks, values) are masked too, circular references become `[Circular]` and nesting deeper than 8 levels
-becomes `[Truncated]`. Redaction is a safety net, not a licence to log secrets: free text such as
+(comma separated, matched the same way: `LOG_REDACT=ssn,iban`). Inside strings (messages, stacks, values) these are
+masked too: `Bearer` / `Basic` credentials, URL passwords (`postgres://app:[REDACTED]@db`), sensitive query
+parameters (`?token=`, `&api_key=`, `&signature=`) and sensitive fields of JSON text, such as an HTTP client's
+serialised request body (`"password":"[REDACTED]"`). Circular references become `[Circular]`, Sets become arrays and
+nesting deeper than 8 levels becomes `[Truncated]`. Redaction is a safety net, not a licence to log secrets: free text such as
 `` `password is ${password}` `` cannot be detected.
 
 `createLogger(options)` builds another logger with the same pipeline; every option defaults to the environment:

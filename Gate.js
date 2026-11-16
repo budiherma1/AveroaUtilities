@@ -298,7 +298,7 @@ export function can(ability, resource, options = {}) {
 
   return async function canMiddleware(req, res, next) {
     try {
-      const user = getUser(req);
+      const user = await getUser(req);
       if (!user) {
         return res.status(401).json({ status: false, message: 'Unauthenticated' });
       }

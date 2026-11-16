@@ -21,7 +21,7 @@ export const REDACTED = '[REDACTED]';
  */
 export const DEFAULT_REDACT_KEYS = Object.freeze([
   'authorization', 'cookie', 'password', 'passwd', 'passphrase', 'secret', 'token',
-  'apikey', 'privatekey', 'credential', 'sessionid', 'csrf',
+  'apikey', 'accesskey', 'privatekey', 'credential', 'sessionid', 'csrf',
 ]);
 
 /** Keys that are sensitive only as a whole word (`pass`, but not `passenger`). */
@@ -34,8 +34,18 @@ const normaliseKey = (key) => String(key).toLowerCase().replace(/[^a-z0-9]/g, ''
 
 /** `Bearer abc.def` / `Basic dXNlcg==` inside strings. */
 const CREDENTIAL_IN_TEXT = /\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{6,}/gi;
+/** The password of `scheme://user:password@host` (database URLs, DSNs). */
+const URL_PASSWORD = /\b([a-z][a-z0-9+.-]*:\/\/[^:/?#\s@]*:)[^@/?#\s]+@/gi;
+/** Sensitive query-string / form parameters: `?token=...`, `&api_key=...`. */
+const SECRET_PARAM = /([?&;](?:[a-z0-9_.-]*(?:token|secret|password|passwd|pwd|apikey|api_key|api-key|accesskey|access_key|signature)|key|sig|code)=)[^&#\s"']+/gi;
+/** Sensitive keys of JSON held in a string, e.g. a serialised request body: `"password":"..."`. */
+const SECRET_JSON_FIELD = /("[^"\\]*(?:password|passwd|secret|token|api_?key|access_?key|authorization|cookie|credential)[^"\\]*"\s*:\s*)"(?:[^"\\]|\\.)*"/gi;
 
-const scrubString = (text) => text.replace(CREDENTIAL_IN_TEXT, (_m, scheme) => `${scheme} ${REDACTED}`);
+const scrubString = (text) => text
+  .replace(CREDENTIAL_IN_TEXT, (_m, scheme) => `${scheme} ${REDACTED}`)
+  .replace(URL_PASSWORD, `$1${REDACTED}@`)
+  .replace(SECRET_PARAM, `$1${REDACTED}`)
+  .replace(SECRET_JSON_FIELD, `$1"${REDACTED}"`);
 
 /**
  * Build a key matcher from DEFAULT_REDACT_KEYS plus `extra` (an array or a
@@ -62,8 +72,8 @@ function redactValue(value, isSensitive, seen, depth) {
   seen.add(value);
 
   let out;
-  if (Array.isArray(value)) {
-    out = value.map((item) => redactValue(item, isSensitive, seen, depth + 1));
+  if (Array.isArray(value) || value instanceof Set) {
+    out = [...value].map((item) => redactValue(item, isSensitive, seen, depth + 1));
   } else {
     out = {};
     if (value instanceof Error) {
@@ -83,8 +93,10 @@ function redactValue(value, isSensitive, seen, depth) {
 
 /**
  * A redacted deep copy of `value` (the original is not changed): values of
- * sensitive keys become '[REDACTED]', `Bearer`/`Basic` credentials inside
- * strings are masked, circular references become '[Circular]', Errors become
+ * sensitive keys become '[REDACTED]'; inside strings, `Bearer`/`Basic`
+ * credentials, URL passwords (`scheme://user:pass@`), sensitive query
+ * parameters (`?token=`, `&api_key=`) and sensitive fields of JSON text
+ * (`"password":"..."`) are masked; Sets become arrays, circular references become '[Circular]', Errors become
  * `{ name, message, stack, ...props }`.
  *
  * @param {*} value

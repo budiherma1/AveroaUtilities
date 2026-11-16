@@ -398,7 +398,11 @@ class FilterSearch {
     if (joinMode) leftJoinRelations(countBuilder, table, this.relations);
     let countRow;
     if (groupBy) {
-      countRow = await countBuilder.countDistinct({ $count: groupBy });
+      // count the groups, not distinct values: COUNT(DISTINCT col) skips NULL, GROUP BY keeps it as a group
+      const grouped = countBuilder.select(groupBy).groupBy(groupBy);
+      const inner = (type === 'model' ? grouped.toKnexQuery() : grouped).as('averoa_groups');
+      const outer = type === 'model' ? table.knex().queryBuilder() : table.client.queryBuilder();
+      countRow = await outer.count({ $count: '*' }).from(inner);
     } else if (joinMode) {
       countRow = await countBuilder.countDistinct({ $count: pk });
     } else {

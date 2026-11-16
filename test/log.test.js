@@ -228,3 +228,21 @@ test('an unwritable log directory falls back to the console', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('secrets inside strings: URL passwords, query parameters and JSON text', () => {
+  const out = redact({
+    config: { data: '{"password":"hunter2","user":"ada"}', url: 'https://api.example.com/v1?api_key=SECRETQ&page=2' },
+    link: '/reset?token=abc123&x=1',
+    dsn: 'postgres://app:pa55word@db.internal/app',
+    awsAccessKeyId: 'AKIAEXAMPLE',
+    tags: new Set(['a', 'Bearer abcdefghij']),
+    harmless: 'monkey=1&keyboard=2&page=3',
+  });
+  assert.equal(out.config.data, '{"password":"[REDACTED]","user":"ada"}');
+  assert.equal(out.config.url, 'https://api.example.com/v1?api_key=[REDACTED]&page=2');
+  assert.equal(out.link, '/reset?token=[REDACTED]&x=1');
+  assert.equal(out.dsn, 'postgres://app:[REDACTED]@db.internal/app');
+  assert.equal(out.awsAccessKeyId, '[REDACTED]');
+  assert.deepEqual(out.tags, ['a', 'Bearer [REDACTED]']);
+  assert.equal(out.harmless, 'monkey=1&keyboard=2&page=3');
+});

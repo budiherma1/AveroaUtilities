@@ -92,7 +92,7 @@ export interface CanOptions {
   /** Default: the application's gate. */
   gate?: AccessGate<any>;
   /** Default: `req.user`. */
-  user?: (req: HttpRequest) => unknown;
+  user?: (req: HttpRequest) => unknown | Promise<unknown>;
   /** Message of the 404 answer when the loader finds nothing. */
   notFoundMessage?: string;
 }

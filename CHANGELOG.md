@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Upgrade notes (behaviour changes)
+
+- **MySQL time zone defaults to UTC.** Without `config/database.js`, MySQL connections now use `DB_TIMEZONE`
+  (default `Z`). If your Node.js process or MySQL server is not on UTC, existing `DATETIME` values are read shifted
+  by the offset; set `DB_TIMEZONE=local` to keep the 2.0.x behaviour. See *Fixed* below.
+- **Console log format.** `Log` prints `pretty` lines only when `NODE_ENV` is `development` or `test`; with any other
+  or no `NODE_ENV` the console shows JSON lines (2.0.x printed winston's `simple` text). Set `LOG_FORMAT=pretty` to
+  keep readable lines.
+- **Rejected values are 400, not 500**, and `groupBy` refuses `$select` / `orderBy` / `$relations` combinations it
+  used to accept (see *Fixed*).
+
 ### Added
 
 - **TypeScript declarations.** Hand-written `.d.ts` files for every module (the runtime JavaScript is unchanged):
@@ -68,8 +79,13 @@
 
 ### Changed
 
-- The console output of `Log` outside production is now the `pretty` format (with timestamp and request id) instead
-  of winston's `simple` format; set `LOG_FORMAT=json` for JSON lines.
+- The console output of `Log` is the `pretty` format (with timestamp and request id) when `NODE_ENV` is
+  `development` or `test`, and JSON lines otherwise, instead of winston's `simple` format; `LOG_FORMAT=json|pretty`
+  overrides it.
+- Redaction also masks secrets inside strings: URL passwords (`scheme://user:pass@`), sensitive query parameters
+  (`?token=`, `&api_key=`, `&signature=`, ...) and sensitive fields of JSON text such as a serialised request body
+  (`"password":"..."`). `accessKey`-style keys are redacted, and Sets are logged as arrays.
+- A job's `tries` is capped at 100 attempts (`Infinity` used to retry forever).
 
 ### Fixed (found by the new MySQL / PostgreSQL integration tests)
 
@@ -88,7 +104,10 @@
   columns no longer fail with `operator does not exist`. `likeClause()` is exported from `FilterSearch.js`.
 - **`groupBy`** selects only the grouped column (other columns are invalid SQL on PostgreSQL and on MySQL with
   `ONLY_FULL_GROUP_BY`). `$select` and `orderBy` may only name that column and `$relations` cannot be combined with
-  it (400).
+  it (400). Pagination counts the groups (a `NULL` group included); it used `COUNT(DISTINCT col)`, which skipped
+  `NULL` and could hide the last page.
+- **`can()`** awaits an async `user` resolver. Before, the pending Promise counted as a user, so a guest was not
+  answered 401 and the ability callback received the Promise.
 
 ### Added
 

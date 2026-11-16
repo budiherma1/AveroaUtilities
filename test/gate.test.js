@@ -298,6 +298,15 @@ describe('can() middleware', () => {
     assert.equal(nextCalls.length, 0);
   });
 
+  test('an async user resolver is awaited: a guest still gets 401', async () => {
+    const lenient = new AccessGate().define('comment', (user) => user.banned !== true);
+    const guest = await run(can('comment', undefined, { gate: lenient, user: async () => null }), {});
+    assert.equal(guest.res.statusCode, 401);
+    assert.equal(guest.nextCalls.length, 0);
+    const member = await run(can('comment', undefined, { gate: lenient, user: async () => alice }), {});
+    assert.deepEqual(member.nextCalls, [undefined]);
+  });
+
   test('403 JSON when denied, next() when allowed', async () => {
     const denied = await run(can('admin', undefined, { gate }), { user: alice });
     assert.equal(denied.res.statusCode, 403);

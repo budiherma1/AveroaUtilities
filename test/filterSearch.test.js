@@ -82,6 +82,18 @@ test('likeClause is parameterized for every dialect', () => {
   }
 });
 
+test('groupBy pagination counts a NULL group like any other group', async () => {
+  await DB('users').insert({ name: null, email: 'nameless@x.io', password: 'p' });
+  const r = await search({ groupBy: 'name', orderBy: 'name', limit: 2 });
+  assert.equal(r.status, true, r.message);
+  // groups: null, alice, bob (COUNT(DISTINCT name) would say 2 and hide the last page)
+  assert.equal(r.metadata.item_total, 3);
+  assert.equal(r.metadata.page_total, 2);
+  assert.equal(r.metadata.has_next_page, true);
+  const page2 = await search({ groupBy: 'name', orderBy: 'name', limit: 2, page: 2 });
+  assert.deepEqual(page2.data.map((u) => u.toJSON()), [{ name: 'bob' }]);
+});
+
 test('groupBy returns only the grouped column; $select / orderBy / $relations must fit it', async () => {
   await DB('users').insert({ name: 'bob', email: 'bob2@x.io', password: 'p' });
   const r = await search({ groupBy: 'name', orderByDesc: 'name' });

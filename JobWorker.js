@@ -15,6 +15,9 @@ function settle(what, fn) {
   }
 }
 
+/** Upper bound of a job's `tries` (total attempts). */
+export const MAX_TRIES = 100;
+
 const describe = (err) => ({
   name: err?.name ?? 'Error',
   message: err?.message ?? String(err),
@@ -139,7 +142,8 @@ export async function startJobWorker({
     const name = message.job;
     const done = Number.isInteger(message.attempt) && message.attempt >= 0 ? message.attempt : 0;
     const attemptNo = done + 1;
-    const maxTries = Math.max(1, Math.floor(Number(JobClass.tries ?? defaults.tries ?? 1)) || 1);
+    // capped: tries = Infinity would retry a failing job forever
+    const maxTries = Math.min(MAX_TRIES, Math.max(1, Math.floor(Number(JobClass.tries ?? defaults.tries ?? 1)) || 1));
     const ms = Number(JobClass.timeout ?? defaults.timeout ?? 0) || 0;
     const controller = new AbortController();
     const context = {

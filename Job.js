@@ -229,7 +229,7 @@ export function fakeJobs() {
  * Static settings (all optional; durations in milliseconds):
  * - `jobName`  registered name (default: the class name); must be unique per worker
  * - `queue`    queue name (default: config/queue.js `jobsQueue`, JOBS_QUEUE or `jobs`)
- * - `tries`    total attempts, including the first (default 1: no retry)
+ * - `tries`    total attempts, including the first (default 1: no retry; at most 100)
  * - `backoff`  wait before a retry: ms, `[ms, ...]` per retry, or `(retry) => ms`
  * - `timeout`  max run time of one attempt; 0 / unset = none
  *

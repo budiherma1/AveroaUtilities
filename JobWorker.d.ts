@@ -7,6 +7,9 @@ export type JobList = ReadonlyArray<typeof Job> | Record<string, unknown>;
  * Registry `name -> class` from `jobs`, or from the Job exports of the app's
  * app/Jobs/index.js when `jobs` is not given. Duplicate names are an error.
  */
+/** Upper bound of a job's `tries` (total attempts): 100. */
+export const MAX_TRIES: number;
+
 export function loadJobs(jobs?: JobList | null): Promise<Map<string, typeof Job>>;
 
 export interface JobWorkerOptions {
