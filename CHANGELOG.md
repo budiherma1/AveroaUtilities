@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.1.2
+
+### Changed
+
+- Releases are published from GitHub Actions with npm trusted publishing (OIDC, no token secret) and carry an npm
+  provenance statement. No code changes.
+
 ## 2.1.1
 
 ### Fixed
