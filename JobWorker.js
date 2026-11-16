@@ -343,7 +343,11 @@ export async function retryFailedJobs({ queue, limit = Infinity } = {}) {
         continue;
       }
       await sendJob(queueName, {
-        id: record.id, job: record.job, payload: record.payload ?? null, attempt: 0, dispatchedAt: new Date().toISOString(),
+        id: record.id,
+        job: record.job,
+        payload: record.payload ?? null,
+        attempt: 0,
+        dispatchedAt: new Date().toISOString(),
       });
       channel.ack(msg);
       moved += 1;

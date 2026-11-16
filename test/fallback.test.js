@@ -15,6 +15,7 @@ after(() => utilities.DB.destroy());
 test('index exports the v2 API', () => {
   for (const name of ['Log', 'DB', 'Mail', 'Queue', 'Fetch', 'Validator', 'FilterSearch', 'Model', 'Crud', 'View',
     'MailWorker', 'startMailWorker', 'closeQueue', 'appRoot', 'appPath', 'appHas', 'importApp', 'importAppDefault']) {
+    // eslint-disable-next-line import-x/namespace -- every listed name is checked at runtime
     assert.ok(utilities[name], `missing export ${name}`);
   }
   assert.equal(utilities.MailWorker, utilities.startMailWorker);

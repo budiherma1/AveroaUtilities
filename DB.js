@@ -134,8 +134,7 @@ const ROOT_IMPORT = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)['"]@averoa\/util
 let instance = null;
 let loadError = null;
 
-/** The resolved knex config (null until loaded). */
-// eslint-disable-next-line import/no-mutable-exports
+/** The resolved knex config (null until loaded); a deliberately mutable live binding. */
 export let databaseConfig = null;
 
 function setInstance(config) {
@@ -207,6 +206,8 @@ function current() {
  * A callable proxy: `DB('users')`, `DB.raw()`, `DB.transaction()`,
  * `Model.knex(DB)` all forward to the real instance.
  */
+// a function (not an arrow) target: the proxy must be callable and keep `prototype`
+// eslint-disable-next-line prefer-arrow-callback
 const DB = new Proxy(function averoaDB() {}, {
   apply(_target, _thisArg, args) {
     return current()(...args);

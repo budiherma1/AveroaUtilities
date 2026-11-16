@@ -220,7 +220,9 @@ describe('startJobWorker', () => {
         throw new Error(`nope ${context.attempt}`);
       }
 
-      async failed(payload, error, context) { failedHook.push({ payload, message: error.message, attempt: context.attempt }); }
+      async failed(payload, error, context) {
+        failedHook.push({ payload, message: error.message, attempt: context.attempt });
+      }
     }
     worker = await startJobWorker({ jobs: [Flaky] });
     const fn = consumerOf('jobs');

@@ -203,7 +203,7 @@ function makeRunner({ lock }) {
     }
     const task = (async () => {
       if (lock) {
-        let acquired = false;
+        let acquired;
         try {
           acquired = await lock(event, scheduledAt);
         } catch (err) {

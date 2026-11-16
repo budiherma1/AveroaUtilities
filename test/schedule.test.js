@@ -40,6 +40,8 @@ describe('ScheduledEvent frequencies', () => {
     assert.throws(() => s.call('x'), /function/);
     class Ping extends Job {}
     assert.equal(s.job(Ping).description, 'Ping');
+    // a named function expression: its name becomes the description
+    // eslint-disable-next-line prefer-arrow-callback
     assert.equal(s.call(function tidy() {}).description, 'tidy');
     assert.equal(s.call(() => {}).description, 'call #3');
   });
@@ -171,4 +173,3 @@ describe('startScheduler', () => {
     assert.ok(ticks.length >= 2 && ticks.length <= 3, `ran ${ticks.length} times`);
   });
 });
-

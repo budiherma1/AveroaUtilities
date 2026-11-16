@@ -11,7 +11,10 @@ const COMPARE = {
   eq: '=', neq: '!=', lt: '<', lte: '<=', gt: '>', gte: '>=',
 };
 
-/** Thrown for invalid client filters; FilterSearch.model/knex turn it into `{ status:false, message, statusCode: 400 }`. */
+/**
+ * Thrown for invalid client filters; FilterSearch.model/knex turn it into
+ * `{ status:false, message, statusCode: 400 }`.
+ */
 export class FilterSearchError extends Error {
   constructor(message, statusCode = 400) {
     super(message);

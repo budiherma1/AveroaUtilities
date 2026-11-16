@@ -195,7 +195,7 @@ test('LOG_CHANNEL: stdout (no file), file (JSON lines), both, and the 2.0 defaul
     });
     const file = path.join(dir, 'averoa.log');
     for (let i = 0; i < 100 && !(fs.existsSync(file) && fs.readFileSync(file, 'utf8').endsWith('\n')); i += 1) {
-      await sleep(10); // eslint-disable-line no-await-in-loop
+      await sleep(10);
     }
     fileLogger.close();
     const [line] = fs.readFileSync(file, 'utf8').trim().split('\n').map((l) => JSON.parse(l));

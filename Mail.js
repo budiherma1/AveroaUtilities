@@ -35,8 +35,9 @@ export async function defaultMailQueue() {
 /** The single nodemailer transporter of the process (created on first use). */
 export async function getTransporter() {
   if (!transporter) {
-    // eslint-disable-next-line no-unused-vars
     const { queue, amqp, ...options } = await loadMailConfig();
+    // nodemailer's documented API is the default export
+    // eslint-disable-next-line import-x/no-named-as-default-member
     transporter = nodemailer.createTransport(options);
   }
   return transporter;

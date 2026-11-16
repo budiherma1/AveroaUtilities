@@ -71,10 +71,12 @@ export function resetJobConfig() {
 }
 
 /** True for Job subclasses (also across duplicated copies of this package). */
+/* eslint-disable no-use-before-define -- Job is declared below; this only runs after the module has loaded */
 export function isJobClass(value) {
   return typeof value === 'function' && value !== Job
     && (value.prototype instanceof Job || value[JOB_MARK] === true);
 }
+/* eslint-enable no-use-before-define */
 
 /** The name a job class is registered and dispatched under. */
 export function jobNameOf(JobClass) {
@@ -239,7 +241,6 @@ export class Job {
   static [JOB_MARK] = true;
 
   /** @param {any} payload @param {object} context */
-  // eslint-disable-next-line no-unused-vars
   async handle(payload, context) {
     throw new Error(`${this.constructor.name}.handle() is not implemented`);
   }

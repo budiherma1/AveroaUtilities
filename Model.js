@@ -11,7 +11,7 @@ async function loadFaker() {
     const mod = await import('@faker-js/faker');
     return mod.faker ?? mod.default?.faker ?? mod.default;
   } catch (e) {
-    throw new Error(`Model seeder needs @faker-js/faker (npm i -D @faker-js/faker): ${e.message}`);
+    throw new Error(`Model seeder needs @faker-js/faker (npm i -D @faker-js/faker): ${e.message}`, { cause: e });
   }
 }
 
@@ -313,12 +313,15 @@ class Model extends Objection {
   static search(query, search) {
     const bound = typeof query?.knex === 'function' ? query.knex() : null; // Objection builder (query(trx) too)
     const dialect = dialectOfKnex(bound ?? (query?.client ? query : this.knex()));
+    let builder = query;
     for (const key in this.column) {
       if (this.column[key].flag?.search !== false && !hiddenColumns(this).includes(key)) {
-        query = dialect === 'pg' ? likeClause(query, dialect, key, `%${search}%`, { or: true }) : query.orWhere(key, 'like', `%${search}%`);
+        builder = dialect === 'pg'
+          ? likeClause(builder, dialect, key, `%${search}%`, { or: true })
+          : builder.orWhere(key, 'like', `%${search}%`);
       }
     }
-    return query;
+    return builder;
   }
 }
 

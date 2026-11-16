@@ -10,12 +10,12 @@ import FilterSearch, {
 
 beforeEach(async () => {
   await resetDb();
-  await DB("users").insert([
+  await DB('users').insert([
     { name: 'alice', email: 'alice@x.io', password: 'p1' },
     { name: 'bob', email: 'bob@x.io', password: 'p2' },
     { name: 'carol', email: 'carol@x.io', password: 'p3', deleted_at: new Date() },
   ]);
-  await DB("posts").insert([
+  await DB('posts').insert([
     { user_id: 1, title: 'first' },
     { user_id: 1, title: 'second' },
     { user_id: 2, title: 'gone', deleted_at: new Date() },
@@ -249,7 +249,6 @@ test('req.query is not mutated', async () => {
   assert.equal(r.status, true);
   assert.deepEqual(query, { 'name:eq': 'bob' });
 });
-
 
 test('U3: knex/driver errors return a generic message without SQL or values', async () => {
   const r = await FilterSearch.knex(DB('no_such_table'), fakeReq({ query: { 'name:eq': 'S3cretHash' } }), { column: ['name'] });

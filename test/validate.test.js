@@ -139,7 +139,10 @@ test('Standard Schema (zod): parsed output replaces req.body; issues give a 422'
   assert.equal(bad.res.body.data.in, 'body');
   assert.ok(Array.isArray(bad.res.body.data.message) && bad.res.body.data.message.length === 1);
 
-  const nested = await run(validate({ body: z.object({ user: z.object({ name: z.string() }) }) }), { body: { user: {} } });
+  const nested = await run(
+    validate({ body: z.object({ user: z.object({ name: z.string() }) }) }),
+    { body: { user: {} } },
+  );
   assert.equal(nested.res.body.data.column, 'user.name');
 
   const root = await run(validate({ body: z.string() }), { body: {} });

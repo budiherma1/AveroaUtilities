@@ -111,7 +111,9 @@ describe('jobs on RabbitMQ', { skip: !url && 'set RABBITMQ_TEST_SERVER to run' }
         if (!succeed) throw new Error(`fail ${context.attempt}`);
       }
 
-      async failed(payload, error, context) { failed.push({ payload, message: error.message, attempt: context.attempt }); }
+      async failed(payload, error, context) {
+        failed.push({ payload, message: error.message, attempt: context.attempt });
+      }
     }
     const worker = await startJobWorker({ jobs: [Flaky] });
     try {

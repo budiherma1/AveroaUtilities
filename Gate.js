@@ -62,7 +62,11 @@ export class GateResponse {
   /** Throws an AuthorizationError when denied, returns this when allowed. */
   authorize(ability) {
     if (this.allowed) return this;
-    throw new AuthorizationError(this.message ?? DEFAULT_DENY_MESSAGE, this.statusCode ?? 403, { ability, code: this.code });
+    throw new AuthorizationError(
+      this.message ?? DEFAULT_DENY_MESSAGE,
+      this.statusCode ?? 403,
+      { ability, code: this.code },
+    );
   }
 }
 

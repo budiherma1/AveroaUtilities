@@ -6,7 +6,10 @@ import validator from 'validator';
  *
  *   router.post('/auth/login', 'AuthController@login', [validate({
  *     body: {
- *       email: { type: 'string', validation: [{ run: (v) => v.validator.isEmail(v.value), msg: 'email format required' }] },
+ *       email: {
+ *         type: 'string',
+ *         validation: [{ run: (v) => v.validator.isEmail(v.value), msg: 'email format required' }],
+ *       },
  *       password: { type: 'string' },
  *     },
  *   })]);
@@ -203,12 +206,16 @@ export function validate(schemas = {}, options = {}) {
   const status = Number.isInteger(options.status) ? options.status : 422;
   const active = SECTIONS.filter((s) => schemas[s] !== undefined && schemas[s] !== null);
 
+  // named `validate` on purpose (stack traces, route introspection), shadowing the factory
+  // eslint-disable-next-line no-shadow
   const middleware = async function validate(req, res, next) {
     const validated = { ...(req.validated ?? {}) };
     for (const section of active) {
       const schema = schemas[section];
       const input = section === 'body' ? (req.body ?? {}) : (req[section] ?? {});
-      const result = isStandardSchema(schema) ? await runStandard(schema, input) : await runFields(schema, input, section);
+      const result = isStandardSchema(schema)
+        ? await runStandard(schema, input)
+        : await runFields(schema, input, section);
       if (result.error) {
         return res.status(status).json({ status: false, data: { ...result.error, in: section } });
       }

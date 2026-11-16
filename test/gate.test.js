@@ -209,7 +209,9 @@ describe('global before/after callbacks', () => {
   test('after callbacks see every decision', async () => {
     const seen = [];
     const gate = new AccessGate().policy(Post, PostPolicy);
-    gate.after((user, ability, response, resource) => { seen.push([user?.id ?? null, ability, response.allowed, resource?.id]); });
+    gate.after((user, ability, response, resource) => {
+      seen.push([user?.id ?? null, ability, response.allowed, resource?.id]);
+    });
     await gate.allows(alice, 'update', post);
     await gate.allows(bob, 'update', post);
     await gate.allows(null, 'nope');
