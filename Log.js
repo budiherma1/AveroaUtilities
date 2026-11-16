@@ -1,30 +1,30 @@
-// error: 0,
-// warn: 1,
-// info: 2,
-// http: 3,
-// verbose: 4,
-// debug: 5,
-// silly: 6
+// winston levels:
+// error: 0, warn: 1, info: 2, http: 3, verbose: 4, debug: 5, silly: 6
+import fs from 'fs';
 import winston from 'winston';
-import path from 'path';
+import { appPath } from './paths.js';
 
-let __dirname = path.resolve()
+const level = process.env.LOG_LEVEL || 'info';
+const transports = [];
 
-if (__dirname.includes('/node_modules/@averoa/core')) {
-	__dirname = __dirname.replace('/node_modules/@averoa/core', '')
+const dir = appPath('storages', 'logs');
+try {
+  fs.mkdirSync(dir, { recursive: true });
+  transports.push(new winston.transports.File({ filename: `${dir}/averoa.log` }));
+} catch (e) {
+  // Read-only filesystem or missing permissions: fall back to the console only.
+  // eslint-disable-next-line no-console
+  console.warn(`[averoa] cannot write logs to ${dir}: ${e.message}`);
 }
-let filename = path.join(__dirname, '/storages/logs/averoa.log')
+
+if (process.env.NODE_ENV !== 'production' || transports.length === 0) {
+  transports.push(new winston.transports.Console({ format: winston.format.simple() }));
+}
+
 const logger = winston.createLogger({
-	format: winston.format.json(),
-	transports: [
-		new winston.transports.File({ filename }),
-	],
-})
-
-if (process.env.NODE_ENV !== 'production') {
-	logger.add(new winston.transports.Console({
-		format: winston.format.simple(),
-	}));
-}
+  level,
+  format: winston.format.json(),
+  transports,
+});
 
 export default logger;

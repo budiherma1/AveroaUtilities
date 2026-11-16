@@ -1,44 +1,94 @@
-import moment from 'moment';
-import { UploadProvider } from '../../../app/Providers/index.js'
+import { importApp } from './paths.js';
+import FilterSearch, {
+  PublicError, TIMESTAMP_COLUMNS, allowedColumns, applyRelations, applySoftDelete, errorResult, hiddenColumns,
+  parseRelations, parseSelect, usesSoftDelete,
+} from './FilterSearch.js';
+
+/** Resolve a model by name from app/Models/index.js (or accept a model class). */
+async function resolveModel(model) {
+  if (typeof model === 'function') return model;
+  const models = await importApp('app/Models/index.js');
+  const found = models?.[model];
+  if (!found) throw new PublicError(`Model ${model} not found in app/Models/index.js`, 500);
+  return found;
+}
+
+async function uploadProvider() {
+  const providers = await importApp('app/Providers/index.js', { optional: true });
+  if (!providers?.UploadProvider) throw new Error('UploadProvider not found in app/Providers/index.js');
+  return providers.UploadProvider;
+}
+
+/**
+ * Columns writable from a raw request body: no pk, audit columns or unknown
+ * keys; hidden columns only when flagged `writable: true` (same rule as
+ * Model.writableColumns / validationRouter).
+ */
+function writableColumns(model) {
+  const hidden = hiddenColumns(model);
+  const allowHidden = (c) => !hidden.includes(c) || model.column?.[c]?.flag?.writable === true;
+  if (typeof model.writableColumns === 'function') {
+    return model.writableColumns().filter(allowHidden);
+  }
+  const skip = new Set([...[].concat(model.idColumn), ...TIMESTAMP_COLUMNS]);
+  return Object.keys(model.column ?? {}).filter((c) => !skip.has(c) && allowHidden(c));
+}
+
+/**
+ * Payload for insert/patch. `req.dataReq` (set by the crud route middleware
+ * or by your own code) is trusted; a raw `req.body` is whitelisted.
+ */
+function payloadFrom(model, req) {
+  if (req.dataReq && typeof req.dataReq === 'object') return { ...req.dataReq };
+  const body = req.body ?? {};
+  const out = {};
+  for (const column of writableColumns(model)) {
+    if (column in body) out[column] = body[column];
+  }
+  return out;
+}
 
 class Crud {
   static async create(model, req, option = {}, trx = null) {
     try {
+      const Model = await resolveModel(model);
+      const data = payloadFrom(Model, req);
 
-      const importModel = (await import(`@averoa/models`))[model];
-      let additionalCreate = option.insert ?? {}
-
-      let dataReq = req.dataReq ?? req.body;
       if (req.dataFiles !== undefined) {
+        const uploader = await uploadProvider();
         for (const key in req.dataFiles) {
-          let upload = await UploadProvider.upload(req.dataFiles[key], req.routeData)
-          dataReq[key] = upload;
+          data[key] = await uploader.upload(req.dataFiles[key], req.routeData);
         }
       }
 
-      let dataFromJwt = {}
-      if (req.user) {
-        dataFromJwt = { created_by: req.user.id, updated_by: req.user.id }
+      if (req.user && usesSoftDelete(Model)) {
+        data.created_by = req.user.id;
+        data.updated_by = req.user.id;
       }
 
-      const data = await importModel.query(trx).insert({ ...dataReq, ...dataFromJwt, ...additionalCreate });
-      return { status: true, data };
+      const result = await Model.query(trx).insert({ ...data, ...(option.insert ?? {}) });
+      return { status: true, data: result };
     } catch (e) {
-      return { status: false, message: e.message }
+      return errorResult(e, 'Crud.create');
     }
   }
 
   static async findAll(model, req, option = {}) {
-    const importModel = (await import(`@averoa/models`))[model];
-    // const data = await FilterSearch.knex(DB('teacher'), req);
-    let isDatatable = req.query?.['$datatable'] ? true : false;
-    let datatableDraw = req.query?.['$draw'];
+    const Model = await resolveModel(model);
+    const query = { ...(req.query ?? {}) };
+    const isDatatable = Boolean(query.$datatable);
+    const datatableDraw = query.$draw;
+    delete query._; // jQuery cache buster, never a filter
     if (isDatatable) {
-      delete req.query['$draw'];
-      delete req.query['$datatable'];
-      delete req.query['_'];
+      delete query.$draw;
+      delete query.$datatable;
     }
-    const data = await importModel.filterSearch.call(importModel, req);
+
+    // req-like object whose `query` is our copy (req.query is never mutated)
+    const request = Object.create(req, { query: { value: query, enumerable: true } });
+    const data = typeof Model.filterSearch === 'function'
+      ? await Model.filterSearch(request, option)
+      : await FilterSearch.model(Model, request, option);
 
     if (isDatatable && data.status) {
       return {
@@ -46,7 +96,7 @@ class Crud {
         recordsTotal: data.metadata?.item_total ?? 0,
         recordsFiltered: data.metadata?.item_total ?? 0,
         data: data.data,
-      }
+      };
     }
 
     return data;
@@ -54,65 +104,74 @@ class Crud {
 
   static async findOne(model, req, option = {}) {
     try {
+      const Model = await resolveModel(model);
+      const q = { ...(req.query ?? {}) };
+      const query = Model.query().findById(req.params.id);
+      applySoftDelete(query, Model);
 
-      const importModel = (await import(`@averoa/models`))[model];
-      const data = importModel.query();
-
-      if (req.query?.$relations) {
-        data.withGraphFetched(req.query.$relations);
+      if (q.$select !== undefined) {
+        const columns = parseSelect(q.$select, allowedColumns(Model));
+        query.select(columns.map((c) => `${Model.tableName}.${c}`));
       }
-      if (req.query?.$select) {
-        let arrSelect = req.query.$select.replaceAll(' ', '').split(',');
-        data.select(arrSelect);
+      if (q.$relations !== undefined) {
+        applyRelations(query, Model, parseRelations(Model, q.$relations), 'fetch');
       }
 
-      let result = await data.findById(req.params.id);
-      return { status: true, data: result };
+      const result = await query;
+      return { status: true, data: result ?? null };
     } catch (e) {
-      return { status: false, message: e.message }
+      return errorResult(e, 'Crud.findOne');
     }
   }
 
   static async update(model, req, option = {}, trx = null) {
     try {
+      const Model = await resolveModel(model);
+      const data = payloadFrom(Model, req);
+      delete data.created_by;
+      delete data.created_at;
 
-      const importModel = (await import(`@averoa/models`))[model];
-      let additionalUpdate = option.update ?? {}
-
-      let dataReq = req.dataReq ?? req.body;
       if (req.dataFiles !== undefined) {
-        let oldData = await importModel.query(trx).findById(req.params.id);
+        const uploader = await uploadProvider();
+        const old = await Model.query().findById(req.params.id);
         for (const key in req.dataFiles) {
-          let upload = await UploadProvider.upload(req.dataFiles[key], req.routeData, oldData[key])
-          dataReq[key] = upload;
+          data[key] = await uploader.upload(req.dataFiles[key], req.routeData, old?.[key]);
         }
       }
 
-      let dataFromJwt = {}
-      if (req.user) {
-        dataFromJwt = { created_by: req.user.id, updated_by: req.user.id }
+      if (usesSoftDelete(Model)) {
+        data.updated_at = new Date();
+        if (req.user) data.updated_by = req.user.id;
       }
 
-      const data = await importModel.query(trx)
-        .findById(req.params.id)
-        .update({ ...dataReq, ...dataFromJwt, ...additionalUpdate });
-      return { status: !!data };
+      const query = Model.query(trx).findById(req.params.id);
+      applySoftDelete(query, Model);
+      const affected = await query.patch({ ...data, ...(option.update ?? {}) });
+      return { status: !!affected };
     } catch (e) {
-      return { status: false, message: e.message }
+      return errorResult(e, 'Crud.update');
     }
   }
 
+  /** Soft delete (sets deleted_at/deleted_by) when `timestamp !== false`, hard delete otherwise. */
   static async delete(model, req, option = {}, trx = null) {
     try {
-
-      const importModel = (await import(`@averoa/models`))[model];
-      let additionalUpdate = option.update ?? {}
-      const data = await importModel.query(trx)
-        .findById(req.params.id)
-        .update({ deleted_at: moment().format('YYYY-MM-DD hh:mm:ss'), ...additionalUpdate });
-      return { status: !!data };
+      const Model = await resolveModel(model);
+      const query = Model.query(trx).findById(req.params.id);
+      let affected;
+      if (usesSoftDelete(Model)) {
+        applySoftDelete(query, Model);
+        affected = await query.patch({
+          deleted_at: new Date(),
+          deleted_by: req.user?.id ?? null,
+          ...(option.update ?? {}),
+        });
+      } else {
+        affected = await query.delete();
+      }
+      return { status: !!affected };
     } catch (e) {
-      return { status: false, message: e.message }
+      return errorResult(e, 'Crud.delete');
     }
   }
 }

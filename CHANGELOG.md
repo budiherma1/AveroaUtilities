@@ -1,0 +1,110 @@
+# Changelog
+
+## 2.0.0
+
+Requires Node >= 18.17, ESM only. Peer dependencies: `knex ^3`, `objection ^3`, `edge.js ^5`
+(and optionally `@faker-js/faker` for seeders) — install them in the app.
+
+### Breaking changes
+
+- **No more `./../../../` imports.** App files are found through `@averoa/utilities/paths`
+  (`AVEROA_ROOT` env, or the nearest `package.json` above `cwd`). Missing `config/*.js` files
+  fall back to env (`DB_*`, `MAIL_*`, `RABBITMQ_SERVER`, `FETCH_BASE_URL`/`FETCH_TIMEOUT`).
+  `config/*.js` may export an object or a function `(process) => object`.
+- **HTTP status codes in crud middleware.** `validationRouter` responds **422**
+  `{ status:false, data:{ column, message } }`; `checkParamId` responds **404**
+  `{ status:false, message }` (it used to be 200 for both).
+- **Soft delete is enforced** for every model with `timestamp !== false`: listing, `findOne`,
+  `checkParamId`, `update`, `delete`, unique checks and fetched relations ignore rows with
+  `deleted_at` set. `$withTrashed=1` only works when the model sets `static allowWithTrashed = true`.
+  `Crud.delete` hard-deletes models with `timestamp: false`.
+- **`static hidden = []`** on models: hidden columns are stripped from JSON, cannot be used in
+  `$select`, filters or `orderBy`, and are not writable from requests (crud routes or a raw
+  `req.body`) unless flagged `writable: true`.
+- **`$select`** only accepts the model's columns (+ timestamp columns) minus hidden; anything else
+  returns `{ status:false, message }`.
+- **`$relations`** is validated against `static allowGraph` (default: the model's own
+  `relationMappings` keys, depth 1). Models without relations reject `$relations`.
+- **Filters are strict where it matters:** `col:op` filters on unknown/hidden columns, unknown
+  operators on known columns, non-scalar values and invalid `limit`/`page` return
+  `{ status:false, message }`. Query keys that are not filters at all (`_`, `utm_*`, DataTables'
+  `draw`/`columns[...]`, a bare hidden column such as `?password=x`) are ignored, never applied.
+  `orderBy`/`groupBy` only accept the model's own columns.
+- **`limit`** is capped by `config.maxLimit` (default 1000); `limit=0` means "all, up to maxLimit".
+  `limit` must be an integer >= 0 and `page` an integer >= 1.
+- **`:like`** is parameterized (`?? like binary ?` on MySQL, `like` elsewhere); `:ilike` uses
+  `ilike` on PostgreSQL. `:search` uses `ilike` on PostgreSQL.
+- **`$relations-type=join`** now paginates on root rows (not joined rows) and counts correctly.
+- **Crud:** `create`/`update` from a raw `req.body` only write known, non-hidden model columns
+  (no primary key, no `created_*`/`updated_*`/`deleted_*`). `req.dataReq` is still trusted.
+  `update` never overwrites `created_by`/`created_at` and sets `updated_at`/`updated_by`.
+  `delete` stores a correct 24h timestamp (`new Date()`, was `moment().format('hh')`) and sets
+  `deleted_by`. Models are loaded from `app/Models/index.js` (no more `@averoa/models`).
+  `moment` is no longer a dependency.
+- **`validationRouter`** strips the primary key (unless `flag.fillable: true`), audit columns and
+  hidden columns (unless `flag.writable: true`) from `req.body`; upload columns are required only on create; `req.body` may be undefined.
+- **Queue:** one lazy AMQP connection + confirm channel (was a new connection per message),
+  durable queues, persistent messages; `Queue()` now resolves after the broker confirm.
+  New `closeQueue()`, `configureQueue()`.
+- **MailWorker:** the demo that sent 3 fake mails is gone. Default export / `startMailWorker({ queue,
+  prefetch, maxRetries, transporter })` consumes the mail queue and returns `{ stop() }`.
+- **Mail:** one shared transporter; `.queue()` with no name uses `config/mail.js` `queue`,
+  env `MAIL_QUEUE`, or `'mail'`; `send()` awaits the enqueue. View render errors are logged and
+  thrown (they used to be swallowed). Strings containing `<` are used as raw HTML.
+- **Model seeders** load `@faker-js/faker` lazily; `seederCustom` no longer opens a second knex
+  pool. `migrationUp` only uses `ON UPDATE CURRENT_TIMESTAMP` on MySQL.
+- **AuthSandbox** is a per-request factory `Auth(req)` (was a shared singleton that leaked
+  `req` between concurrent requests).
+- **View** is the single Edge instance (mounted at `<app>/resources/views`, cache on in production).
+- **Log** writes to `<app>/storages/logs/averoa.log` (created if missing); level from `LOG_LEVEL`.
+
+### Fixes from the v2 review (still 2.0.0)
+
+- **Config files must not import the root package.** `config/database.js` / `config/fetch.js`
+  that `import ... from '@averoa/utilities'` used to deadlock the top-level await in `DB.js` /
+  `Fetch.js` (node exited with code 13 and no message). Import helpers from
+  **`@averoa/utilities/paths`** in config files. It no longer hangs either way:
+  - no `config/database.js` → `DB` is built synchronously from env;
+  - a config that imports the root package → loaded lazily, with a warning;
+  - any other config → awaited at import time as before, for at most 2 s
+    (`AVEROA_CONFIG_WAIT_MS`), then loading continues in the background.
+  `DB` is now a callable proxy over the knex instance (`DB('t')`, `DB.raw`, `DB.transaction`,
+  `Model.knex(DB)` keep working). New `getDB()` / `DB.ready` (resolve to the knex instance) and
+  `isDBReady()`; code that can run before the config has loaded should `await getDB()`.
+  `databaseConfig` is now a live binding (`null` until loaded). `Fetch` loads `config/fetch.js`
+  in the background; requests made before that wait for it (`Fetch.ready`, `fetchReady`).
+- **No SQL in error responses.** `Crud.*` and `FilterSearch.model/knex` return
+  `{ status:false, message:'Database error' }` (or `'Internal error'`) instead of the driver
+  message, which contained the interpolated SQL and values (e.g. password hashes). The full error
+  is logged with `Log.error`. Filter (`FilterSearchError`), Objection validation and `PublicError`
+  messages are still returned.
+- **`$relations-type=join`** uses a LEFT JOIN (as in 1.x) for counting/filtering, and soft-deleted
+  related rows are excluded inside the join: they can't be matched by `relation.col` filters and
+  parents without live children are kept.
+- **`FilterSearch.knex`** counts on a copy of the builder without its `select`/`orderBy` (valid
+  SQL on PostgreSQL and MySQL `ONLY_FULL_GROUP_BY`), and accepts qualified whitelist columns
+  (`column: ['u.id', 'p.title']`, `?u.id:eq=1`).
+- **`Crud.findAll(model, req, option)`** passes `option` (`maxLimit`, `limit`, `page`) on:
+  `Model.filterSearch(req, config)` now takes the FilterSearch config.
+- **Objects/arrays are rejected** by `validationRouter` (422 `must be a scalar value`) and
+  `Model.validation` unless the column has `flag: { json: true }`; validators of json columns get
+  `JSON.stringify(value)`.
+- **Hidden columns are not writable from requests** — through crud routes (`validationRouter` drops
+  them from `req.body`) or a raw body (`Crud.create/update`) — unless the column has
+  `flag: { writable: true }`. To accept a password from clients, either mark the column
+  `writable: true` (its validators and `required` then apply; hash it in `$beforeInsert` /
+  `$beforeUpdate`), or set it yourself in app code via `req.dataReq` / the model.
+- **MailWorker** survives broker restarts: it listens to channel and connection `close`/`error`
+  (a channel error no longer crashes the process) and re-creates the consumer with exponential
+  backoff (`reconnectDelay` 1000 ms doubling to `maxReconnectDelay` 30000 ms); `stop()` cancels
+  pending reconnects. The ack after a successful send is outside the send `try`: an ack failure is
+  logged and never re-publishes the mail (no duplicate). `consumerTag` reflects the current consumer.
+- `npm test` runs `test/*.test.js` only (fixtures are no longer executed as tests).
+
+### Added
+
+- `index.js` exports `appRoot, appPath, appHas, importApp, importAppDefault, resetAppRoot`,
+  `startMailWorker`, `MailWorker`, `closeQueue`, `FilterSearchError`, `getDB`, `isDBReady`,
+  `fetchReady`. `FilterSearch.js` also exports `PublicError`, `errorResult`, `leftJoinRelations`.
+- `package.json` `exports`: `.`, `./paths`, `./*` (old deep imports keep working).
+- Tests (`npm test`, node:test + better-sqlite3).
