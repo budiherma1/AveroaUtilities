@@ -20,10 +20,40 @@ export function sqliteFilename(name) {
   return appPath(name);
 }
 
+const MYSQL_CLIENTS = new Set(['mysql', 'mysql2']);
+
+/**
+ * Time zone for MySQL connections, from `DB_TIMEZONE`:
+ *   unset / 'Z' / 'UTC' → `{ driver: 'Z', session: '+00:00' }` (default)
+ *   '+07:00'            → `{ driver: '+07:00', session: '+07:00' }`
+ *   'local'             → null (driver default: the Node.js process time zone, session untouched)
+ *
+ * `driver` is the mysql/mysql2 `timezone` option (how JS Dates are written and
+ * read), `session` the MySQL `time_zone` set on every new connection (what
+ * CURRENT_TIMESTAMP and TIMESTAMP columns are rendered in). Both must agree,
+ * or `created_at` (filled by MySQL) and `deleted_at` (written by Crud from a JS
+ * Date) end up in different zones whenever the Node.js and MySQL time zones differ.
+ */
+export function mysqlTimezone(value = process.env.DB_TIMEZONE) {
+  const tz = String(value ?? '').trim();
+  if (!tz || tz === 'Z' || tz.toUpperCase() === 'UTC') return { driver: 'Z', session: '+00:00' };
+  if (tz.toLowerCase() === 'local') return null;
+  if (/^[+-](0\d|1[0-4]):[0-5]\d$/.test(tz)) return { driver: tz, session: tz };
+  throw new Error(`DB_TIMEZONE must be Z, UTC, local or an offset such as +07:00 (got "${tz}")`);
+}
+
+/** knex `pool.afterCreate` that sets the MySQL session time zone. */
+function setSessionTimezone(session) {
+  return (connection, done) => {
+    connection.query('SET time_zone = ?', [session], (err) => done(err, connection));
+  };
+}
+
 /**
  * Env-based configuration used when the app has no config/database.js.
  * SQLite clients get `{ filename: DB_NAME || ':memory:' }` (relative names resolved
- * against the app root) and `useNullAsDefault`.
+ * against the app root) and `useNullAsDefault`. MySQL clients get a consistent
+ * time zone (see mysqlTimezone(), `DB_TIMEZONE`).
  */
 export function envDatabaseConfig() {
   const client = process.env.DB_CLIENT || 'mysql2';
@@ -34,7 +64,7 @@ export function envDatabaseConfig() {
       useNullAsDefault: true,
     };
   }
-  return {
+  const config = {
     client,
     connection: {
       host: process.env.DB_HOST,
@@ -44,6 +74,12 @@ export function envDatabaseConfig() {
       database: process.env.DB_NAME,
     },
   };
+  const tz = MYSQL_CLIENTS.has(client) ? mysqlTimezone() : null;
+  if (tz) {
+    config.connection.timezone = tz.driver;
+    config.pool = { afterCreate: setSessionTimezone(tz.session) };
+  }
+  return config;
 }
 
 const DRIVERS = {

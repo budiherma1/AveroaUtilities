@@ -1070,6 +1070,7 @@ only used when the matching `config/*.js` file does not exist or exports nothing
 | `DB_USER` | — | Database user. |
 | `DB_PASS` | — | Database password. |
 | `DB_NAME` | — | Database name; the database file for `sqlite3`/`better-sqlite3` (default `:memory:`; a relative path is resolved against the app root, like `@averoa/core`'s knexfile). |
+| `DB_TIMEZONE` | `Z` | `mysql`/`mysql2` only: `Z`/`UTC`, an offset such as `+07:00`, or `local`. Sets both the driver `timezone` and the session `time_zone`, so `created_at` (filled by MySQL) and `deleted_at` (written from a JS `Date`) use the same zone. `local` keeps the driver default (Node.js time zone) and leaves the session alone. |
 | `MAIL_HOST` | — | SMTP host. |
 | `MAIL_PORT` | — | SMTP port. |
 | `MAIL_SECURE` | — | `true` for implicit TLS; any other value means `false`. Unset leaves nodemailer's default. |
@@ -1114,6 +1115,26 @@ npm test
 The suite covers models, CRUD, filters, the DB loader, the queue, logging (format, channels, request context,
 redaction) and config import cycles. It uses `node:test` and an in-memory `better-sqlite3` database with the fixture app in `test/fixtures/`. AMQP
 and SMTP are replaced by in-process fakes, so no MySQL, RabbitMQ or mail server is needed.
+
+### Integration tests
+
+`test/integration/` runs `Model`, `Crud` and `FilterSearch` against a real MySQL and PostgreSQL server, using the
+fixture app in `test/fixtures/integration-app` (no `config/database.js`, so `DB` is built from the `DB_*` variables).
+Each dialect is skipped unless its URL is set. Use a throwaway database: the suite drops and recreates its `it_*`
+tables.
+
+```bash
+AVEROA_TEST_MYSQL_URL=mysql://user:pass@127.0.0.1:3306/averoa_test \
+AVEROA_TEST_PG_URL=postgres://user:pass@127.0.0.1:5432/averoa_test \
+npm run test:integration
+```
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs `npm test` on Node.js 20, 22 and 24, and `npm run test:integration` against MySQL
+8.0 / 8.4 and PostgreSQL 16 / 17 service containers (with `TZ=Asia/Jakarta`, so the Node.js and server time zones
+differ). `.github/workflows/release.yml` publishes to npm when a `vX.Y.Z` tag matching `package.json` is pushed,
+after the same checks; it needs an `NPM_TOKEN` repository secret.
 
 ## Upgrading
 

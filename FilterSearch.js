@@ -48,6 +48,26 @@ function isDatabaseError(e) {
   ));
 }
 
+const MYSQL_DATA_ERRORS = new Set([
+  'ER_DATA_TOO_LONG', 'ER_TRUNCATED_WRONG_VALUE', 'ER_TRUNCATED_WRONG_VALUE_FOR_FIELD', 'ER_WRONG_VALUE',
+]);
+
+/**
+ * True when the database rejected a value (SQLSTATE class 22, "data exception"):
+ * `'abc'` for an integer column on PostgreSQL (or in a MySQL UPDATE), an invalid
+ * date, a string too long for its column. Objection wraps these as `DataError`;
+ * plain knex builders (FilterSearch.knex) throw the driver error.
+ */
+export function isDataError(e) {
+  if (!e || typeof e !== 'object') return false;
+  if (e.name === 'DataError') return true;
+  const native = e.nativeError ?? e;
+  let state = '';
+  if (typeof native.sqlState === 'string') state = native.sqlState;
+  else if (typeof native.code === 'string' && /^[0-9A-Z]{5}$/.test(native.code)) state = native.code;
+  return state.startsWith('22') || MYSQL_DATA_ERRORS.has(native.code);
+}
+
 /**
  * Turn an error caught by FilterSearch/Crud into a client-safe result
  * `{ status:false, message, statusCode }`.
@@ -55,11 +75,16 @@ function isDatabaseError(e) {
  * messages contain the interpolated SQL, including values such as password
  * hashes) and other unexpected errors get a generic message and are logged.
  * `statusCode`: FilterSearchError 400, Objection ValidationError 422,
- * NotFoundError 404, PublicError / `expose` errors their own code, anything else 500.
+ * NotFoundError 404, PublicError / `expose` errors their own code, a value the
+ * database rejects (isDataError) 400 `Invalid value`, anything else 500.
  */
 export function errorResult(e, where = 'query') {
   if (e && (SAFE_ERROR_NAMES.has(e.name) || e.expose === true)) {
     return { status: false, message: e.message, statusCode: exposedStatus(e) };
+  }
+  if (isDataError(e)) {
+    Log.warn(`${where} rejected a value: ${e.message}`);
+    return { status: false, message: 'Invalid value', statusCode: 400 };
   }
   const db = isDatabaseError(e);
   Log.error(`${where} failed: ${e?.stack ?? e}`);
@@ -262,6 +287,25 @@ export function baseTableRef(builder) {
   return null;
 }
 
+/**
+ * Add a parameterized LIKE condition to a knex / Objection builder.
+ * - MySQL: `col like cast(? as binary)` (case-sensitive; replaces the deprecated
+ *   `like binary ?`), `col like ?` when `insensitive` (the column collation decides).
+ * - PostgreSQL: `cast(col as text) like|ilike ?`, so numeric, date and other
+ *   non-text columns work instead of failing with `operator does not exist`.
+ * - Others: `col like ?`.
+ */
+export function likeClause(builder, dialect, column, pattern, { or = false, insensitive = false } = {}) {
+  const raw = or ? 'orWhereRaw' : 'whereRaw';
+  if (dialect === 'mysql') {
+    return builder[raw](insensitive ? '?? like ?' : '?? like cast(? as binary)', [column, pattern]);
+  }
+  if (dialect === 'pg') {
+    return builder[raw](`cast(?? as text) ${insensitive ? 'ilike' : 'like'} ?`, [column, pattern]);
+  }
+  return builder[or ? 'orWhere' : 'where'](column, 'like', pattern);
+}
+
 /* ------------------------------------------------------------------------ */
 /* FilterSearch                                                              */
 /* ------------------------------------------------------------------------ */
@@ -331,6 +375,7 @@ class FilterSearch {
     const select = this.filter.$select !== undefined ? parseSelect(this.filter.$select, this.allowed) : null;
     const order = this.parseOrder();
     const groupBy = this.filter.groupBy !== undefined ? this.ownColumn(this.filter.groupBy, 'groupBy') : null;
+    if (groupBy) this.checkGroupBy(groupBy, select, order);
 
     const base = () => {
       const builder = type === 'model' ? table.query() : table.clone();
@@ -378,9 +423,11 @@ class FilterSearch {
       }
     } else {
       const dataBuilder = base();
-      if (select) dataBuilder.select(select.map((c) => this.qualify(c)));
+      // grouped rows only have the grouped column (anything else is invalid
+      // SQL on MySQL's ONLY_FULL_GROUP_BY and on PostgreSQL)
+      if (groupBy) dataBuilder.clearSelect().select(groupBy).groupBy(groupBy);
+      else if (select) dataBuilder.select(select.map((c) => this.qualify(c)));
       else if (type === 'knex' && this.hasHidden) dataBuilder.select(this.allowed);
-      if (groupBy) dataBuilder.groupBy(groupBy);
       if (this.relations) applyRelations(dataBuilder, table, this.relations, 'fetch');
       if (order) dataBuilder.orderBy(order.column, order.direction);
       data = await dataBuilder.limit(effectiveLimit).offset(offset);
@@ -399,6 +446,20 @@ class FilterSearch {
       },
       data,
     };
+  }
+
+  /**
+   * `groupBy` returns one row per value of the grouped column, so `$select`
+   * and `orderBy` may only name that column and `$relations` is not allowed.
+   */
+  checkGroupBy(groupBy, select, order) {
+    if (this.relations) throw new FilterSearchError('$relations cannot be combined with groupBy');
+    if (select && select.some((c) => this.qualify(c) !== groupBy)) {
+      throw new FilterSearchError('with groupBy, $select may only contain the groupBy column');
+    }
+    if (order && order.column !== groupBy) {
+      throw new FilterSearchError('with groupBy, orderBy / orderByDesc may only use the groupBy column');
+    }
   }
 
   parseInteger(name, value, min) {
@@ -480,14 +541,8 @@ class FilterSearch {
 
   /** Build `(builder, column, boolean)` appliers for each filter key. */
   operator(op, key, value) {
-    const like = (col, pattern, b, or) => {
-      if (this.dialect === 'mysql') {
-        b[or ? 'orWhereRaw' : 'whereRaw']('?? like binary ?', [col, pattern]);
-      } else {
-        b[or ? 'orWhere' : 'where'](col, 'like', pattern);
-      }
-    };
-    const ilikeOp = this.dialect === 'pg' ? 'ilike' : 'like';
+    const like = (col, pattern, b, or) => likeClause(b, this.dialect, col, pattern, { or });
+    const ilike = (col, pattern, b, or) => likeClause(b, this.dialect, col, pattern, { or, insensitive: true });
 
     switch (op) {
       case 'eq': case 'neq': case 'lt': case 'lte': case 'gt': case 'gte': {
@@ -500,7 +555,7 @@ class FilterSearch {
       }
       case 'ilike': {
         const v = this.scalar(key, value);
-        return (b, col, or) => b[or ? 'orWhere' : 'where'](col, ilikeOp, v);
+        return (b, col, or) => ilike(col, v, b, or);
       }
       case 'in': {
         const list = splitList(value, `invalid value for ${key}`);
@@ -518,7 +573,7 @@ class FilterSearch {
       case 'search': {
         const words = this.scalar(key, value).split(' ').filter(Boolean);
         return (b, col, or) => b[or ? 'orWhere' : 'where']((inner) => {
-          for (const w of words) inner.orWhere(col, ilikeOp, `%${w}%`);
+          for (const w of words) ilike(col, `%${w}%`, inner, true);
         });
       }
       default:

@@ -6,7 +6,7 @@ import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { envDatabaseConfig } from '../DB.js';
+import { envDatabaseConfig, mysqlTimezone } from '../DB.js';
 import * as utilities from '../index.js';
 import * as paths from '@averoa/utilities/paths';
 
@@ -99,4 +99,44 @@ test('2.0.2: a relative SQLite DB_NAME resolves against the app root, not the cw
   assert.equal(sqliteFilename('/abs/db.sqlite'), '/abs/db.sqlite');
   assert.equal(sqliteFilename('file:db.sqlite?mode=ro'), 'file:db.sqlite?mode=ro');
   assert.equal(sqliteFilename('database/dev.sqlite'), appPath('database/dev.sqlite'));
+});
+
+test('mysqlTimezone / envDatabaseConfig: MySQL driver and session time zones agree (DB_TIMEZONE)', () => {
+  assert.deepEqual(mysqlTimezone(undefined), { driver: 'Z', session: '+00:00' });
+  assert.deepEqual(mysqlTimezone(''), { driver: 'Z', session: '+00:00' });
+  assert.deepEqual(mysqlTimezone('UTC'), { driver: 'Z', session: '+00:00' });
+  assert.deepEqual(mysqlTimezone('+07:00'), { driver: '+07:00', session: '+07:00' });
+  assert.deepEqual(mysqlTimezone('-03:30'), { driver: '-03:30', session: '-03:30' });
+  assert.equal(mysqlTimezone('local'), null);
+  assert.throws(() => mysqlTimezone('Asia/Jakarta'), /DB_TIMEZONE must be/);
+  assert.throws(() => mysqlTimezone('+25:00'), /DB_TIMEZONE must be/);
+
+  const saved = { DB_CLIENT: process.env.DB_CLIENT, DB_TIMEZONE: process.env.DB_TIMEZONE };
+  try {
+    delete process.env.DB_TIMEZONE;
+    for (const client of ['mysql', 'mysql2']) {
+      process.env.DB_CLIENT = client;
+      const config = envDatabaseConfig();
+      assert.equal(config.connection.timezone, 'Z');
+      const calls = [];
+      const conn = { query: (sql, values, cb) => { calls.push([sql, values]); cb(null); } };
+      let done;
+      config.pool.afterCreate(conn, (err, c) => { done = [err, c]; });
+      assert.deepEqual(calls, [['SET time_zone = ?', ['+00:00']]]);
+      assert.deepEqual(done, [null, conn]);
+    }
+    process.env.DB_TIMEZONE = 'local';
+    const local = envDatabaseConfig();
+    assert.equal('timezone' in local.connection, false);
+    assert.equal(local.pool, undefined);
+
+    process.env.DB_CLIENT = 'pg';
+    delete process.env.DB_TIMEZONE;
+    assert.equal(envDatabaseConfig().pool, undefined);
+    assert.equal('timezone' in envDatabaseConfig().connection, false);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
 });

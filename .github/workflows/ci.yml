@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+  # release.yml runs this workflow before publishing
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20.x, 22.x, 24.x]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      # No lockfile on purpose (package-lock.json is gitignored): a library is
+      # installed by its users with fresh semver ranges, so CI resolves them the
+      # same way and catches a breaking dependency release early.
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Test
+        run: npm test
+
+  # test/integration/*.test.js against real servers (they skip without the URL variables)
+  mysql:
+    name: MySQL ${{ matrix.mysql }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        mysql: ['8.0', '8.4']
+    services:
+      mysql:
+        image: mysql:${{ matrix.mysql }}
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: averoa_test
+          MYSQL_USER: averoa
+          MYSQL_PASSWORD: averoa
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    env:
+      AVEROA_TEST_MYSQL_URL: mysql://averoa:averoa@127.0.0.1:3306/averoa_test
+      # Node.js in another time zone than the server (UTC), so the driver and
+      # session time zones (DB_TIMEZONE) are really exercised
+      TZ: Asia/Jakarta
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.x
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Integration tests
+        run: npm run test:integration
+
+  postgres:
+    name: PostgreSQL ${{ matrix.postgres }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ['16', '17']
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}-alpine
+        env:
+          POSTGRES_USER: averoa
+          POSTGRES_PASSWORD: averoa
+          POSTGRES_DB: averoa_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U averoa -d averoa_test"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      AVEROA_TEST_PG_URL: postgres://averoa:averoa@127.0.0.1:5432/averoa_test
+      TZ: Asia/Jakarta
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.x
+      - name: Install
+        run: npm install --no-audit --no-fund
+      - name: Integration tests
+        run: npm run test:integration

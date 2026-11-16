@@ -4,7 +4,9 @@ import {
   DB, Users, Posts, resetDb, fakeReq,
 } from './helpers.js';
 import knex from 'knex';
-import FilterSearch, { baseTableRef } from '../FilterSearch.js';
+import FilterSearch, {
+  baseTableRef, errorResult, isDataError, likeClause,
+} from '../FilterSearch.js';
 
 beforeEach(async () => {
   await resetDb();
@@ -52,13 +54,70 @@ test(':like / :ilike SQL per dialect is parameterized', () => {
     fs.operator(op, `name:${op}`, "x' OR '1'='1")(builder, 'users.name', false);
     return builder.toSQL();
   };
+  // MySQL: case-sensitive via cast(? as binary) (`like binary ?` is deprecated since 8.0.27)
   const mysql = build('mysql', 'like');
-  assert.equal(mysql.sql, 'select * from `users` where `users`.`name` like binary ?');
+  assert.equal(mysql.sql, 'select * from `users` where `users`.`name` like cast(? as binary)');
   assert.deepEqual(mysql.bindings, ["x' OR '1'='1"]);
+  assert.equal(build('mysql', 'ilike').sql, 'select * from `users` where `users`.`name` like ?');
+  // PostgreSQL: cast to text, so numeric / date columns don't fail with "operator does not exist"
   const pg = build('pg', 'ilike');
-  assert.equal(pg.sql, 'select * from "users" where "users"."name" ilike ?');
+  assert.equal(pg.sql, 'select * from "users" where cast("users"."name" as text) ilike ?');
   const pgLike = build('pg', 'like');
-  assert.equal(pgLike.sql, 'select * from "users" where "users"."name" like ?');
+  assert.equal(pgLike.sql, 'select * from "users" where cast("users"."name" as text) like ?');
+  assert.deepEqual(pgLike.bindings, ["x' OR '1'='1"]);
+  const pgSearch = build('pg', 'search');
+  const castIlike = 'cast("users"."name" as text) ilike ?';
+  assert.equal(pgSearch.sql, `select * from "users" where (${[castIlike, castIlike, castIlike].join(' or ')})`); // 3 words
+  assert.equal(build('better-sqlite3', 'like').sql, 'select * from `users` where `users`.`name` like ?');
+});
+
+test('likeClause is parameterized for every dialect', () => {
+  const payload = "%' or 1=1 --";
+  for (const [client, dialect] of [['mysql2', 'mysql'], ['pg', 'pg'], ['better-sqlite3', 'sqlite']]) {
+    for (const insensitive of [false, true]) {
+      const q = likeClause(knex({ client })('t'), dialect, 't.c', payload, { insensitive }).toSQL();
+      assert.deepEqual(q.bindings, [payload], `${dialect} ${insensitive}`);
+      assert.doesNotMatch(q.sql, /or 1=1/);
+    }
+  }
+});
+
+test('groupBy returns only the grouped column; $select / orderBy / $relations must fit it', async () => {
+  await DB('users').insert({ name: 'bob', email: 'bob2@x.io', password: 'p' });
+  const r = await search({ groupBy: 'name', orderByDesc: 'name' });
+  assert.equal(r.status, true, r.message);
+  assert.deepEqual(r.data.map((u) => u.toJSON()), [{ name: 'bob' }, { name: 'alice' }]);
+  assert.equal(r.metadata.item_total, 2);
+  assert.equal((await search({ groupBy: 'name', $select: 'name' })).status, true);
+
+  for (const [query, message] of [
+    [{ groupBy: 'name', $select: 'id,name' }, 'with groupBy, $select may only contain the groupBy column'],
+    [{ groupBy: 'name', orderBy: 'id' }, 'with groupBy, orderBy / orderByDesc may only use the groupBy column'],
+    [{ groupBy: 'name', $relations: 'posts' }, '$relations cannot be combined with groupBy'],
+  ]) {
+    assert.deepEqual(await search(query), { status: false, message, statusCode: 400 });
+  }
+});
+
+test('isDataError / errorResult: a value the database rejects is a 400, other DB errors a 500', () => {
+  const pgInvalid = Object.assign(new Error('invalid input syntax for type integer: "abc"'), { code: '22P02', severity: 'ERROR' });
+  const mysqlTruncated = Object.assign(new Error('Truncated incorrect DOUBLE value'), {
+    code: 'ER_TRUNCATED_WRONG_VALUE', errno: 1292, sqlState: '22007', sqlMessage: 'x',
+  });
+  const mysqlWrongValue = Object.assign(new Error('Incorrect TIMESTAMP value'), {
+    code: 'ER_WRONG_VALUE', errno: 1525, sqlState: 'HY000', sqlMessage: 'x',
+  });
+  const wrapped = Object.assign(new Error('select ... - invalid input'), { name: 'DataError', nativeError: pgInvalid });
+  for (const e of [pgInvalid, mysqlTruncated, mysqlWrongValue, wrapped]) {
+    assert.equal(isDataError(e), true, e.message);
+    assert.deepEqual(errorResult(e), { status: false, message: 'Invalid value', statusCode: 400 });
+  }
+  const missingTable = Object.assign(new Error('relation "x" does not exist'), { code: '42P01', severity: 'ERROR' });
+  const sqlite = Object.assign(new Error('SQLITE_ERROR: no such table'), { code: 'SQLITE_ERROR' });
+  for (const e of [missingTable, sqlite, new Error('boom'), null, 'x']) {
+    assert.equal(isDataError(e), false, String(e?.message ?? e));
+  }
+  assert.deepEqual(errorResult(missingTable), { status: false, message: 'Database error', statusCode: 500 });
 });
 
 test('operators eq/in/btwn/search/multi-column', async () => {

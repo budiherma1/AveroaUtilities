@@ -16,6 +16,7 @@
   `toJSONSchema` / `jsonSchema` options).
 - `isStandardSchema(value)` and the `VALIDATE` symbol.
 - `zod` as a devDependency (tests only).
+
 ### Added (observability)
 
 - **Request context.** New `context.js` (also `@averoa/utilities/context`): `requestContext` (`AsyncLocalStorage`,
@@ -35,6 +36,30 @@
 
 - The console output of `Log` outside production is now the `pretty` format (with timestamp and request id) instead
   of winston's `simple` format; set `LOG_FORMAT=json` for JSON lines.
+
+### Fixed (found by the new MySQL / PostgreSQL integration tests)
+
+- **MySQL time zones.** Without `config/database.js`, `mysql`/`mysql2` connections now set the driver `timezone` and
+  the session `time_zone` to the same value, from the new `DB_TIMEZONE` (default `Z`, i.e. UTC; `+07:00`-style
+  offsets and `local` are accepted). Before, `created_at` (filled by MySQL) and `deleted_at` (written by `Crud` from a
+  JS `Date`) could be stored in different zones. `DB_TIMEZONE=local` keeps the previous behaviour. `mysqlTimezone()` is
+  exported from `DB.js`.
+- **A value the database rejects is a 400 `Invalid value`**, not a 500 `Database error` (SQLSTATE class 22, e.g.
+  `'abc'` for an integer column on PostgreSQL). `Crud.findOne`, `Crud.delete` and the `checkParamId` route hook answer 404
+  for an id the database rejects, and `Model.isDuplicate` treats it as no match. `isDataError()` is exported from
+  `FilterSearch.js`.
+- **`:like` on MySQL** uses `like cast(? as binary)` instead of the deprecated `like binary ?`; `:ilike` and `:search`
+  on MySQL use the column collation.
+- **`:like`, `:ilike`, `:search` and `Model.search()` on PostgreSQL** cast the column to `text`, so numeric and date
+  columns no longer fail with `operator does not exist`. `likeClause()` is exported from `FilterSearch.js`.
+- **`groupBy`** selects only the grouped column (other columns are invalid SQL on PostgreSQL and on MySQL with
+  `ONLY_FULL_GROUP_BY`). `$select` and `orderBy` may only name that column and `$relations` cannot be combined with
+  it (400).
+
+### Added
+
+- `npm run test:integration` (MySQL / PostgreSQL, skipped without `AVEROA_TEST_MYSQL_URL` / `AVEROA_TEST_PG_URL`) and
+  GitHub Actions workflows for CI and tag-triggered npm releases.
 
 ## 2.0.2
 
