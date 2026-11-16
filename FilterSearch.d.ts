@@ -130,6 +130,9 @@ export interface LikeOptions {
 }
 
 /** Add a parameterized LIKE condition (dialect aware) to a knex / Objection builder. */
+/** `req.params.id` when it is one value; null for an array (Express 5 wildcard), undefined when absent. */
+export function routeId(req: { params?: Record<string, unknown> } | null | undefined): string | number | null | undefined;
+
 export function likeClause<QB>(builder: QB, dialect: string, column: string, pattern: string, options?: LikeOptions): QB;
 
 /** Query-string filtering, ordering and pagination. */

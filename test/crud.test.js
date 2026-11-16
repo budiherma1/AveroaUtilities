@@ -294,3 +294,19 @@ test('U-j: findOne / update / delete answer 404 for a missing or soft-deleted id
   assert.equal(found.data.name, 'alice');
   assert.equal('statusCode' in found, false);
 });
+
+test('an array id (Express 5 wildcard parameter) is not found, never a composite key', async () => {
+  await DB('users').insert({ name: 'alice', email: 'alice@x.io', password: 'p1' });
+  const req = (extra = {}) => fakeReq({ params: { id: ['1', '2'] }, ...extra });
+  assert.equal((await Crud.findOne('Users', req())).statusCode, 404);
+  assert.equal((await Crud.update('Users', req({ body: { name: 'x' } }))).statusCode, 404);
+  assert.equal((await Crud.delete('Users', req())).statusCode, 404);
+  assert.equal((await DB('users').where({ id: 1 }).first()).name, 'alice', 'untouched');
+
+  let status;
+  let nextCalled = false;
+  const res = { status(code) { status = code; return this; }, send() { return this; } };
+  await Users.checkParamId(req(), res, () => { nextCalled = true; });
+  assert.equal(status, 404);
+  assert.equal(nextCalled, false);
+});

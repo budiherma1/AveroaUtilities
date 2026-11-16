@@ -8,7 +8,9 @@ import {
   Job, JobTimeoutError, fakeJobs, exponentialBackoff, backoffDelay, normaliseDelay, validateQueueName,
   resetJobConfig, MAX_DELAY,
 } from '../Job.js';
-import { startJobWorker, retryFailedJobs, loadJobs } from '../JobWorker.js';
+import {
+  startJobWorker, retryFailedJobs, loadJobs, UNKNOWN_JOB_RETRIES,
+} from '../JobWorker.js';
 import {
   createMockAmqp, message, wait, until,
 } from './amqp-mock.js';
@@ -311,10 +313,30 @@ describe('startJobWorker', () => {
     assert.match(amqp.state.published.at(-1).body.error.message, /timed out after 30 ms/);
   });
 
-  test('unknown job names and malformed messages go to the failed queue', async () => {
+  test('an unknown job is re-queued with a growing delay for another worker (rolling deploys)', async () => {
     worker = await startJobWorker({ jobs: [FixtureEchoJob] });
     const fn = consumerOf('jobs');
-    const unknown = message({ id: 'u', job: '../../etc/passwd', payload: { a: 1 } });
+    const first = message({ id: 'n', job: 'AddedInTheNextRelease', payload: { a: 1 } });
+    fn(first);
+    await until(() => amqp.state.acks.includes(first));
+    let p = amqp.state.published.at(-1);
+    assert.equal(p.q, 'jobs.delay.5000');
+    assert.deepEqual({ job: p.body.job, payload: p.body.payload, unknownRetries: p.body.unknownRetries },
+      { job: 'AddedInTheNextRelease', payload: { a: 1 }, unknownRetries: 1 });
+
+    const third = message({ id: 'n', job: 'AddedInTheNextRelease', payload: null, unknownRetries: 2 });
+    fn(third);
+    await until(() => amqp.state.acks.includes(third));
+    p = amqp.state.published.at(-1);
+    assert.equal(p.q, 'jobs.delay.20000');
+    assert.equal(p.body.unknownRetries, 3);
+    assert.equal(handled.length, 0);
+  });
+
+  test('unknown job names (after the retries) and malformed messages go to the failed queue', async () => {
+    worker = await startJobWorker({ jobs: [FixtureEchoJob] });
+    const fn = consumerOf('jobs');
+    const unknown = message({ id: 'u', job: '../../etc/passwd', payload: { a: 1 }, unknownRetries: UNKNOWN_JOB_RETRIES });
     fn(unknown);
     await until(() => amqp.state.acks.includes(unknown));
     let p = amqp.state.published.at(-1);
@@ -322,7 +344,7 @@ describe('startJobWorker', () => {
     assert.equal(p.body.job, '../../etc/passwd');
     assert.match(p.body.error.message, /unknown job/);
 
-    const proto = message({ id: 'p', job: 'constructor', payload: null });
+    const proto = message({ id: 'p', job: 'constructor', payload: null, unknownRetries: UNKNOWN_JOB_RETRIES });
     fn(proto);
     await until(() => amqp.state.acks.includes(proto));
     assert.match(amqp.state.published.at(-1).body.error.message, /unknown job "constructor"/);
@@ -347,7 +369,7 @@ describe('startJobWorker', () => {
     amqp.state.failPublish = 2;
     const junk = message('junk');
     fn(junk);
-    const unknown = message({ job: 'Nope' });
+    const unknown = message({ job: 'Nope', unknownRetries: UNKNOWN_JOB_RETRIES });
     fn(unknown);
     await until(() => amqp.state.nacks.length === 2);
     assert.deepEqual(amqp.state.nacks.find((n) => n.msg === junk), { msg: junk, requeue: false });
@@ -377,6 +399,45 @@ describe('startJobWorker', () => {
     release();
     await stopping;
     assert.equal(finished, true);
+    worker = null;
+  });
+
+  test('stop() also waits for a timed-out job that ignores its signal; stop({ timeout }) gives up', async () => {
+    let release;
+    let finished = false;
+    class Stubborn extends Job {
+      static timeout = 20;
+
+      async handle() { // ignores context.signal
+        await new Promise((r) => { release = r; });
+        finished = true;
+      }
+    }
+    worker = await startJobWorker({ jobs: [Stubborn] });
+    const m = message({ id: 's', job: 'Stubborn' });
+    consumerOf('jobs')(m);
+    await until(() => amqp.state.acks.includes(m)); // timed out and settled
+    const stopping = worker.stop();
+    await wait(30);
+    assert.equal(finished, false, 'still running');
+    let resolved = false;
+    stopping.then(() => { resolved = true; });
+    await wait(10);
+    assert.equal(resolved, false, 'stop() waits for it');
+    release();
+    await stopping;
+    assert.equal(finished, true);
+
+    // a handler that never finishes: stop({ timeout }) returns anyway
+    class Forever extends Job {
+      async handle() { await new Promise(() => {}); }
+    }
+    worker = await startJobWorker({ jobs: [Forever] });
+    consumerOf('jobs')(message({ id: 'f', job: 'Forever' }));
+    await wait(10);
+    const started = Date.now();
+    await worker.stop({ timeout: 50 });
+    assert.ok(Date.now() - started < 1000);
     worker = null;
   });
 });

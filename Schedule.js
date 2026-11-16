@@ -199,7 +199,7 @@ function makeRunner({ lock }) {
     const { event } = entry;
     if (!event.overlapping && entry.running) {
       Log.info(`Scheduler: skipping "${event.description}", the previous run is still running`);
-      return;
+      return Promise.resolve(false);
     }
     const task = (async () => {
       if (lock) {
@@ -208,15 +208,16 @@ function makeRunner({ lock }) {
           acquired = await lock(event, scheduledAt);
         } catch (err) {
           Log.error(`Scheduler: lock for "${event.description}" failed, skipping: ${err?.message ?? err}`);
-          return;
+          return false;
         }
-        if (!acquired) return;
+        if (!acquired) return false;
       }
       try {
         await event.run();
       } catch (err) {
         Log.error(`Scheduler: "${event.description}" failed: ${err?.message ?? err}`);
       }
+      return true; // it ran (a failure is logged above)
     })();
     entry.running = task;
     running.add(task);
@@ -224,6 +225,7 @@ function makeRunner({ lock }) {
       running.delete(task);
       if (entry.running === task) entry.running = null;
     });
+    return task;
   }
   return { fire, running };
 }
@@ -303,7 +305,8 @@ export async function startScheduler({
 
 /**
  * Run, once, every event due in the current minute, wait for them and resolve
- * to their names. For a system cron / Kubernetes CronJob that starts the
+ * to the names of those that ran (a failed run counts; one skipped because
+ * `lock` said no, or because it was still running, does not). For a system cron / Kubernetes CronJob that starts the
  * process every minute instead of a long-running scheduler. 6-field (seconds)
  * expressions match second 0 only.
  *
@@ -318,9 +321,9 @@ export async function runScheduleOnce({
   const minute = new Date(at);
   minute.setSeconds(0, 0);
   const due = entries.filter((e) => e.cron.match(minute));
-  for (const entry of due) fire(entry, minute);
+  const ran = await Promise.all(due.map((entry) => fire(entry, minute)));
   await Promise.allSettled([...running]);
-  return due.map((e) => e.event.description);
+  return due.filter((_entry, i) => ran[i]).map((e) => e.event.description);
 }
 
 export default Schedule;

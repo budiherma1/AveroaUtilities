@@ -80,6 +80,17 @@ describe('runScheduleOnce', () => {
     }
   });
 
+  test('resolves to the events that ran: one the lock skipped is left out, a failed one is kept', async () => {
+    const schedule = new Schedule();
+    const ran = [];
+    schedule.call(() => { ran.push('a'); }, 'a').everyMinute();
+    schedule.call(() => { ran.push('locked'); }, 'locked').everyMinute();
+    schedule.call(() => { throw new Error('boom'); }, 'fails').everyMinute();
+    const lock = async (event) => event.description !== 'locked';
+    assert.deepEqual(await runScheduleOnce({ schedule, lock, at: new Date(2026, 0, 1, 3, 0) }), ['a', 'fails']);
+    assert.deepEqual(ran, ['a']);
+  });
+
   test('time zones: per event, or the scheduler default', async () => {
     const schedule = new Schedule();
     schedule.call(() => {}, 'jakarta').dailyAt('03:00').timezone('Asia/Jakarta'); // 20:00 UTC

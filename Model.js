@@ -1,7 +1,7 @@
 import { Model as Objection } from 'objection';
 import validator from 'validator';
 import FilterSearch, {
-  TIMESTAMP_COLUMNS, applySoftDelete, hiddenColumns, isDataError, likeClause,
+  TIMESTAMP_COLUMNS, applySoftDelete, hiddenColumns, isDataError, likeClause, routeId,
 } from './FilterSearch.js';
 import { dialectOfKnex } from './config.js';
 
@@ -211,7 +211,7 @@ class Model extends Objection {
       sanitized[key] = data[key];
 
       if (def.flag?.unique === true && !isEmpty(data[key])) {
-        if (await this.isDuplicate(key, data[key], create ? undefined : req.params?.id)) {
+        if (await this.isDuplicate(key, data[key], create ? undefined : (routeId(req) ?? undefined))) {
           messages.push(`duplicate value ${data[key]}`);
         }
       }
@@ -253,8 +253,9 @@ class Model extends Objection {
 
   /** Crud route middleware: 404 `{ status:false, message }` when req.params.id doesn't exist (or is soft-deleted). */
   static async checkParamId(req, res, next) {
-    const id = req.params?.id;
+    const id = routeId(req);
     if (id === undefined) return next();
+    if (id === null) return res.status(404).send({ status: false, message: `ID ${req.params.id} doesn't exist` });
     const query = this.query().findById(id).select([].concat(this.idColumn).map((c) => `${this.tableName}.${c}`));
     applySoftDelete(query, this);
     let row;
@@ -313,15 +314,17 @@ class Model extends Objection {
   static search(query, search) {
     const bound = typeof query?.knex === 'function' ? query.knex() : null; // Objection builder (query(trx) too)
     const dialect = dialectOfKnex(bound ?? (query?.client ? query : this.knex()));
-    let builder = query;
-    for (const key in this.column) {
-      if (this.column[key].flag?.search !== false && !hiddenColumns(this).includes(key)) {
-        builder = dialect === 'pg'
-          ? likeClause(builder, dialect, key, `%${search}%`, { or: true })
-          : builder.orWhere(key, 'like', `%${search}%`);
+    const columns = Object.keys(this.column)
+      .filter((key) => this.column[key].flag?.search !== false && !hiddenColumns(this).includes(key));
+    if (columns.length === 0) return query;
+    // one parenthesised group: `where <existing> and (a like ? or b like ?)`; without it,
+    // the ORs would also match rows the query's other conditions (soft deletes, scopes) exclude
+    return query.where((group) => {
+      for (const key of columns) {
+        if (dialect === 'pg') likeClause(group, dialect, key, `%${search}%`, { or: true });
+        else group.orWhere(key, 'like', `%${search}%`);
       }
-    }
-    return builder;
+    });
   }
 }
 

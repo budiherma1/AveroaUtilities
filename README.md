@@ -447,7 +447,7 @@ a plain object (no `unique` check, no database access) and returns `{ status: tr
 | `writableColumns()` | Columns a client may write: all of `column` except the audit columns, the primary key (unless `fillable`) and hidden columns (unless `writable`). |
 | `isDuplicate(column, value, exceptId?)` | `true` when a live row already has `value` in `column`. |
 | `filterSearch(req, config?)` | `FilterSearch.model(this, req, config)`. Override it to customise listing; `Crud.findAll` calls it. |
-| `search(query, term)` | Adds `orWhere(col, 'like', '%term%')` to `query` for every non-hidden column whose `search` flag is not `false`. |
+| `search(query, term)` | Adds one parenthesised group `(col like '%term%' or ...)` to `query`, over every non-hidden column whose `search` flag is not `false`; the query's other conditions still apply. |
 
 Hidden columns are removed in `$formatJson`, so they disappear from `toJSON()`, `JSON.stringify()` and `res.json()`
 (including nested relations) but stay readable as properties in your code (`user.password`).
@@ -1055,17 +1055,23 @@ It resolves to `{ queues, jobs, consumerTags, stop() }`. Behaviour:
   message unacked, and RabbitMQ delivers it again. Write `handle()` so that running it twice is harmless.
 - **Timeout:** the attempt fails with `JobTimeoutError` and `context.signal` is aborted. JavaScript cannot kill a
   running function: a handler that ignores the signal keeps running in the background while the retry is scheduled.
-- **Unknown job names and malformed messages** are moved to `<queue>.failed` (unknown names stay retryable, for
-  example after a deploy that adds the class). If even that publish fails, an unknown job is requeued and a malformed
-  message is dropped.
+- **Unknown job names** are re-queued with a growing delay (5 s, 10 s, ... at most 5 minutes, `UNKNOWN_JOB_RETRIES` =
+  10 times, about 35 minutes), so during a rolling deploy an older worker hands a new job to a newer one instead of
+  failing it. After that the job goes to `<queue>.failed` (still retryable with `retryFailedJobs()`).
+- **Malformed messages** (not JSON, no job name) go straight to `<queue>.failed`. If that publish fails, a malformed
+  message is dropped and an unknown job is requeued.
 - **Broker restarts and errors** are handled like the mail worker: the consumers are re-created with exponential
   backoff, a channel error does not crash the process, and `startJobWorker()` rejects if the first connection fails.
-- **`stop()`:** cancels the consumers and pending reconnects, waits for the running jobs, then closes the worker's
-  channel. The shared connection stays open; call `closeQueue()` to close it.
+- **`stop({ timeout? })`:** cancels the consumers and pending reconnects, waits for the running jobs (timed-out
+  handlers that are still running included), then closes the worker's channel. Without `timeout` it waits as long as
+  they run; with `timeout` (ms) it stops waiting after that long and the broker redelivers the unfinished messages.
+  The shared connection stays open; call `closeQueue()` to close it.
 
 ### Failed jobs
 
-Jobs that failed for good are kept in RabbitMQ, in the durable queue `<queue>.failed`, as JSON records:
+Jobs that failed for good are kept in RabbitMQ, in the durable queue `<queue>.failed`, as JSON records (the queue
+has no size limit: cap it with a RabbitMQ policy, which applies to an existing queue without redeclaring it, e.g.
+`rabbitmqctl set_policy failed-jobs '\.failed$' '{"max-length":10000}' --apply-to queues`):
 
 ```json
 { "id": "…", "job": "SendInvoiceJob", "queue": "billing", "payload": { "invoiceId": 7 }, "attempt": 5,
@@ -1133,7 +1139,7 @@ due time, runs every event that is due, and logs (never throws) task errors. Occ
 stopped or asleep are not caught up. `stop()` stops scheduling and waits for running tasks.
 
 `runScheduleOnce({ schedule?, timezone?, lock?, at? })` runs the events due in the current minute once, waits for them
-and resolves to their names. Use it when a system cron or a Kubernetes CronJob starts the process every minute instead
+and resolves to the names of those that ran (failed runs included; events skipped by `lock` are not). Use it when a system cron or a Kubernetes CronJob starts the process every minute instead
 of keeping a scheduler running.
 
 **Run one scheduler.** Every running scheduler fires every event, so run exactly one scheduler process per

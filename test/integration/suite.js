@@ -408,6 +408,9 @@ export default function suite(dialect) {
     test('Model.search matches text and numeric columns', async () => {
       const rows = await Users.query().where((b) => Users.search(b, '40')).whereNull('deleted_at');
       assert.deepEqual(rows.map((u) => u.name), ['bob']);
+      // without manual wrapping: search() groups its ORs itself, so the soft-delete filter still applies
+      const grouped = await Users.search(Users.query().whereNull('deleted_at'), '40');
+      assert.deepEqual(grouped.map((u) => u.name), ['bob']);
     });
   });
 }

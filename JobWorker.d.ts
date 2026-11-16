@@ -10,6 +10,9 @@ export type JobList = ReadonlyArray<typeof Job> | Record<string, unknown>;
 /** Upper bound of a job's `tries` (total attempts): 100. */
 export const MAX_TRIES: number;
 
+/** Times an unknown job name is re-queued (growing delay) before it goes to `<queue>.failed`: 10. */
+export const UNKNOWN_JOB_RETRIES: number;
+
 export function loadJobs(jobs?: JobList | null): Promise<Map<string, typeof Job>>;
 
 export interface JobWorkerOptions {
@@ -40,7 +43,8 @@ export interface JobWorkerHandle {
   /** Tags of the current consumers (they change after a reconnect). */
   readonly consumerTags: string[];
   /** Stop consuming and reconnecting, wait for running jobs, close the channel. */
-  stop(): Promise<void>;
+  /** Stop consuming, wait for running jobs; with `timeout` (ms), stop waiting after that long. */
+  stop(options?: { timeout?: number }): Promise<void>;
 }
 
 /** Consume job queues and run the jobs (retries, backoff, timeouts, failed queue, reconnects). */

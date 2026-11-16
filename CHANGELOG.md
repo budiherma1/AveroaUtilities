@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.1.1
+
+### Fixed
+
+- **`Model.search(query, term)` keeps the query's other conditions.** Its `like` conditions are now one parenthesised
+  group (`... and (a like ? or b like ?)`). Before, they were appended as bare `orWhere`s, so a query with
+  `whereNull('deleted_at')` or another scope also returned rows those conditions excluded.
+- **Unknown job names during rolling deploys.** A worker that does not know a job re-queues it with a growing delay
+  (up to `UNKNOWN_JOB_RETRIES` = 10 times, about 35 minutes) for a newer worker, instead of moving it to
+  `<queue>.failed` at once.
+- **`stop()` of the job worker** also waits for timed-out handlers that ignore `context.signal`, and takes
+  `{ timeout }` to stop waiting after that many milliseconds.
+- **`runScheduleOnce()`** resolves to the events that ran; events the `lock` skipped are left out.
+- **Array route ids** (Express 5 wildcard parameters) are answered 404 by `Crud.findOne/update/delete` and
+  `checkParamId` instead of reaching objection as a composite key. New export `routeId(req)` (`FilterSearch.js`).
+
+### Documentation
+
+- How to cap `<queue>.failed` with a RabbitMQ policy.
+
 ## 2.1.0
 
 ### Upgrade notes (behaviour changes)

@@ -102,7 +102,7 @@ declare class Model extends ObjectionModel {
   /** Validate a plain object (no unique check, no database access). */
   static validation(request?: Record<string, unknown>, type?: 'create' | 'update' | (string & {})): ModelValidationResult;
 
-  /** OR `column like %search%` over the searchable columns. */
+  /** `and (column like %search% or ...)` over the searchable columns; other conditions still apply. */
   static search<QB>(query: QB, search: string): QB;
 }
 

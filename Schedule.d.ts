@@ -103,5 +103,5 @@ export interface RunScheduleOnceOptions {
   at?: Date;
 }
 
-/** Run every event due in the current minute once; resolves to their names. */
+/** Run every event due in the current minute once; resolves to the names of those that ran (not those `lock` skipped). */
 export function runScheduleOnce(options?: RunScheduleOnceOptions): Promise<string[]>;

@@ -18,6 +18,15 @@ function settle(what, fn) {
 /** Upper bound of a job's `tries` (total attempts). */
 export const MAX_TRIES = 100;
 
+/**
+ * A job name this worker does not know (typically an older worker during a
+ * rolling deploy that added the job) is re-published with a growing delay
+ * (5 s, 10 s, ... capped at 5 min) up to this many times (about 35 minutes in
+ * all), so a newer worker can take it; then it goes to `<queue>.failed`.
+ */
+export const UNKNOWN_JOB_RETRIES = 10;
+const unknownJobDelay = (n) => Math.min(5000 * 2 ** n, 5 * 60 * 1000);
+
 const describe = (err) => ({
   name: err?.name ?? 'Error',
   message: err?.message ?? String(err),
@@ -94,6 +103,15 @@ export async function startJobWorker({
   const defaults = { tries, backoff, timeout };
 
   const inFlight = new Set();
+  // handle() promises, kept until they settle: a timed-out job that ignores
+  // context.signal keeps running after its message was settled
+  const running = new Set();
+  const track = (promise) => {
+    const tracked = Promise.resolve(promise);
+    running.add(tracked);
+    tracked.then(() => running.delete(tracked), () => running.delete(tracked));
+    return tracked;
+  };
   let stopped = false;
   let current = null; // { channel, connection, consumerTags, detach }
   let timer = null;
@@ -135,7 +153,22 @@ export async function startJobWorker({
     }
     const JobClass = registry.get(message.job);
     if (!JobClass) {
-      await reject(channel, msg, queueName, message, new Error(`unknown job "${message.job}"`), { requeueOnError: true });
+      const seen = Number.isInteger(message.unknownRetries) && message.unknownRetries >= 0 ? message.unknownRetries : 0;
+      if (seen >= UNKNOWN_JOB_RETRIES) {
+        await reject(channel, msg, queueName, message, new Error(`unknown job "${message.job}"`), { requeueOnError: true });
+        return;
+      }
+      const wait = unknownJobDelay(seen);
+      Log.warn(`JobWorker: unknown job "${message.job}" on "${queueName}" (not registered in this worker); `
+        + `re-queued in ${wait} ms for another worker (${seen + 1}/${UNKNOWN_JOB_RETRIES})`);
+      try {
+        await sendJob(queueName, { ...message, unknownRetries: seen + 1 }, wait);
+      } catch (e) {
+        Log.error(`JobWorker: cannot re-publish unknown job "${message.job}", requeueing: ${e?.message ?? e}`);
+        settle('nack', () => channel.nack(msg, false, true));
+        return;
+      }
+      settle('ack', () => channel.ack(msg));
       return;
     }
 
@@ -155,7 +188,7 @@ export async function startJobWorker({
     try {
       await runWithTimeout(() => {
         instance = new JobClass();
-        return instance.handle(message.payload ?? null, context);
+        return track(instance.handle(message.payload ?? null, context));
       }, ms, controller, name);
     } catch (err) {
       error = err ?? new Error(`job "${name}" failed`);
@@ -295,8 +328,13 @@ export async function startJobWorker({
     get consumerTags() {
       return [...(current?.consumerTags ?? first.consumerTags)];
     },
-    /** Stop consuming and reconnecting, wait for running jobs, close the channel. */
-    async stop() {
+    /**
+     * Stop consuming and reconnecting, wait for running jobs (also timed-out ones
+     * still running), close the channel. With `timeout` (ms) it stops waiting
+     * after that long; unfinished messages are then redelivered by the broker.
+     * @param {{ timeout?: number }} [options]
+     */
+    async stop({ timeout: stopTimeout } = {}) {
       if (stopped) return;
       stopped = true;
       if (timer) { clearTimeout(timer); timer = null; }
@@ -308,7 +346,17 @@ export async function startJobWorker({
           try { await state.channel.cancel(tag); } catch { /* channel gone */ }
         }
       }
-      await Promise.allSettled([...inFlight]);
+      const settled = Promise.allSettled([...inFlight, ...running]);
+      if (stopTimeout > 0) {
+        let timer2;
+        const expired = new Promise((resolve) => { timer2 = setTimeout(() => resolve(true), stopTimeout); });
+        if (await Promise.race([settled.then(() => false), expired])) {
+          Log.warn(`JobWorker: ${inFlight.size + running.size} job(s) still running after ${stopTimeout} ms; closing anyway`);
+        }
+        clearTimeout(timer2);
+      } else {
+        await settled;
+      }
       if (state) {
         try { await state.channel.close(); } catch { /* already closed */ }
       }

@@ -1,7 +1,7 @@
 import { importApp } from './paths.js';
 import FilterSearch, {
   PublicError, TIMESTAMP_COLUMNS, allowedColumns, applyRelations, applySoftDelete, errorResult, hiddenColumns,
-  isDataError, parseRelations, parseSelect, usesSoftDelete,
+  isDataError, parseRelations, parseSelect, routeId, usesSoftDelete,
 } from './FilterSearch.js';
 
 /** Resolve a model by name from app/Models/index.js (or accept a model class). */
@@ -135,8 +135,10 @@ class Crud {
   static async findOne(model, req, option = {}) {
     try {
       const Model = await resolveModel(model);
+      const id = routeId(req);
+      if (id === null) return notFound(req.params.id);
       const q = { ...(req.query ?? {}) };
-      const query = Model.query().findById(req.params.id);
+      const query = Model.query().findById(id);
       applySoftDelete(query, Model);
 
       if (q.$select !== undefined) {
@@ -148,7 +150,7 @@ class Crud {
       }
 
       const result = await query;
-      if (!result) return notFound(req.params.id);
+      if (!result) return notFound(id);
       return { status: true, data: result };
     } catch (e) {
       return idErrorResult(e, req.params?.id, 'Crud.findOne');
@@ -158,13 +160,15 @@ class Crud {
   static async update(model, req, option = {}, trx = null) {
     try {
       const Model = await resolveModel(model);
+      const id = routeId(req);
+      if (id === null) return notFound(req.params.id);
       const data = payloadFrom(Model, req);
       delete data.created_by;
       delete data.created_at;
 
       if (req.dataFiles !== undefined) {
         const uploader = await uploadProvider();
-        const old = await Model.query(trx).findById(req.params.id);
+        const old = await Model.query(trx).findById(id);
         for (const key in req.dataFiles) {
           data[key] = await uploader.upload(req.dataFiles[key], req.routeData, old?.[key]);
         }
@@ -175,10 +179,10 @@ class Crud {
         if (req.user) data.updated_by = req.user.id;
       }
 
-      const query = Model.query(trx).findById(req.params.id);
+      const query = Model.query(trx).findById(id);
       applySoftDelete(query, Model);
       const affected = await query.patch({ ...data, ...withoutCreated(option.update) });
-      return affected ? { status: true } : notFound(req.params.id);
+      return affected ? { status: true } : notFound(id);
     } catch (e) {
       return errorResult(e, 'Crud.update');
     }
@@ -188,7 +192,9 @@ class Crud {
   static async delete(model, req, option = {}, trx = null) {
     try {
       const Model = await resolveModel(model);
-      const query = Model.query(trx).findById(req.params.id);
+      const id = routeId(req);
+      if (id === null) return notFound(req.params.id);
+      const query = Model.query(trx).findById(id);
       let affected;
       if (usesSoftDelete(Model)) {
         applySoftDelete(query, Model);
@@ -200,7 +206,7 @@ class Crud {
       } else {
         affected = await query.delete();
       }
-      return affected ? { status: true } : notFound(req.params.id);
+      return affected ? { status: true } : notFound(id);
     } catch (e) {
       return idErrorResult(e, req.params?.id, 'Crud.delete');
     }

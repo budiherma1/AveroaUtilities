@@ -401,3 +401,13 @@ test('U-e: knex mode qualifies deleted_at with the base table (alias, name or co
   assert.equal(raw.status, true, raw.message);
   assert.equal(raw.data.length, 1);
 });
+
+test('Model.search() groups its ORs: other conditions (soft deletes) still apply', async () => {
+  // carol is soft-deleted; without the parentheses `deleted_at is null or name like '%carol%'` matched her
+  const deleted = await Users.search(Users.query().whereNull('deleted_at'), 'carol');
+  assert.deepEqual(deleted, []);
+  const found = await Users.search(Users.query().whereNull('deleted_at'), 'ali');
+  assert.deepEqual(found.map((u) => u.name), ['alice']);
+  const sql = Users.search(Users.query().where('id', '>', 0), 'x').toKnexQuery().toSQL().sql;
+  assert.match(sql, /where `?"?id`?"? > \? and \(/i);
+});

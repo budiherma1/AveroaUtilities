@@ -298,6 +298,17 @@ export function baseTableRef(builder) {
  *   non-text columns work instead of failing with `operator does not exist`.
  * - Others: `col like ?`.
  */
+/**
+ * `req.params.id` when it is one value. Express 5 gives an array for a
+ * wildcard parameter (`/*id`); an array is not an id (objection would read it
+ * as a composite key), so it resolves to null and the record is not found.
+ */
+export function routeId(req) {
+  const id = req?.params?.id;
+  if (id === undefined) return undefined;
+  return typeof id === 'string' || typeof id === 'number' ? id : null;
+}
+
 export function likeClause(builder, dialect, column, pattern, { or = false, insensitive = false } = {}) {
   const raw = or ? 'orWhereRaw' : 'whereRaw';
   if (dialect === 'mysql') {

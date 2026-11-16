@@ -1,6 +1,6 @@
 {
   "name": "@averoa/utilities",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Model, CRUD, filtering, DB, mail, queue, view and logging utilities for AveroaJS",
   "main": "index.js",
   "type": "module",
