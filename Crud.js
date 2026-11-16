@@ -1,7 +1,7 @@
 import { importApp } from './paths.js';
 import FilterSearch, {
   PublicError, TIMESTAMP_COLUMNS, allowedColumns, applyRelations, applySoftDelete, errorResult, hiddenColumns,
-  parseRelations, parseSelect, usesSoftDelete,
+  isDataError, parseRelations, parseSelect, usesSoftDelete,
 } from './FilterSearch.js';
 
 /** Resolve a model by name from app/Models/index.js (or accept a model class). */
@@ -65,6 +65,15 @@ function withoutCreated(values) {
 /** Result for an id with no live row (missing or soft-deleted). */
 function notFound(id) {
   return { status: false, message: `ID ${id} doesn't exist`, statusCode: 404 };
+}
+
+/**
+ * errorResult for findOne/delete, whose only client value is the id: an id
+ * the database rejects (`'abc'` for an integer key on PostgreSQL, or in a
+ * MySQL UPDATE) cannot exist, so it is a 404 like on SQLite / a MySQL SELECT.
+ */
+function idErrorResult(e, id, where) {
+  return isDataError(e) ? notFound(id) : errorResult(e, where);
 }
 
 class Crud {
@@ -142,7 +151,7 @@ class Crud {
       if (!result) return notFound(req.params.id);
       return { status: true, data: result };
     } catch (e) {
-      return errorResult(e, 'Crud.findOne');
+      return idErrorResult(e, req.params?.id, 'Crud.findOne');
     }
   }
 
@@ -193,7 +202,7 @@ class Crud {
       }
       return affected ? { status: true } : notFound(req.params.id);
     } catch (e) {
-      return errorResult(e, 'Crud.delete');
+      return idErrorResult(e, req.params?.id, 'Crud.delete');
     }
   }
 }

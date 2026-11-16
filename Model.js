@@ -1,7 +1,7 @@
 import { Model as Objection } from 'objection';
 import validator from 'validator';
 import FilterSearch, {
-  TIMESTAMP_COLUMNS, applySoftDelete, hiddenColumns,
+  TIMESTAMP_COLUMNS, applySoftDelete, hiddenColumns, isDataError, likeClause,
 } from './FilterSearch.js';
 import { dialectOfKnex } from './config.js';
 
@@ -144,13 +144,33 @@ class Model extends Objection {
     });
   }
 
+  /**
+   * True when a live row already has `value` in `column` (other than the row
+   * `exceptId`). A value or id the database rejects as invalid for its column
+   * (isDataError, e.g. `'abc'` for an integer on PostgreSQL) cannot match a
+   * stored row, so it is not a duplicate.
+   */
   static async isDuplicate(column, value, exceptId) {
-    const query = this.query().where(`${this.tableName}.${column}`, value);
-    applySoftDelete(query, this);
-    if (exceptId !== undefined && exceptId !== null) {
-      query.whereNot(`${this.tableName}.${[].concat(this.idColumn)[0]}`, exceptId);
+    const count = (withExcept) => {
+      const query = this.query().where(`${this.tableName}.${column}`, value);
+      applySoftDelete(query, this);
+      if (withExcept) query.whereNot(`${this.tableName}.${[].concat(this.idColumn)[0]}`, exceptId);
+      return query.resultSize();
+    };
+    const hasExcept = exceptId !== undefined && exceptId !== null;
+    try {
+      return (await count(hasExcept)) > 0;
+    } catch (e) {
+      if (!isDataError(e)) throw e;
     }
-    return (await query.resultSize()) > 0;
+    if (!hasExcept) return false;
+    try {
+      // the invalid value was the id: no row has it, so nothing to exclude
+      return (await count(false)) > 0;
+    } catch (e) {
+      if (isDataError(e)) return false;
+      throw e;
+    }
   }
 
   /**
@@ -237,7 +257,13 @@ class Model extends Objection {
     if (id === undefined) return next();
     const query = this.query().findById(id).select([].concat(this.idColumn).map((c) => `${this.tableName}.${c}`));
     applySoftDelete(query, this);
-    const row = await query;
+    let row;
+    try {
+      row = await query;
+    } catch (e) {
+      // an id the database rejects for the key column (isDataError) cannot exist
+      if (!isDataError(e)) throw e;
+    }
     if (row) return next();
     return res.status(404).send({ status: false, message: `ID ${id} doesn't exist` });
   }
@@ -280,10 +306,16 @@ class Model extends Objection {
     return { status: true };
   }
 
+  /**
+   * OR `column like %search%` over the searchable columns (`flag.search !== false`,
+   * not hidden). On PostgreSQL non-text columns are cast to text (see likeClause).
+   */
   static search(query, search) {
+    const bound = typeof query?.knex === 'function' ? query.knex() : null; // Objection builder (query(trx) too)
+    const dialect = dialectOfKnex(bound ?? (query?.client ? query : this.knex()));
     for (const key in this.column) {
       if (this.column[key].flag?.search !== false && !hiddenColumns(this).includes(key)) {
-        query = query.orWhere(key, 'like', `%${search}%`);
+        query = dialect === 'pg' ? likeClause(query, dialect, key, `%${search}%`, { or: true }) : query.orWhere(key, 'like', `%${search}%`);
       }
     }
     return query;
