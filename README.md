@@ -184,10 +184,13 @@ import {
   Mail, MailWorker, startMailWorker, Queue, closeQueue,
   View, Log, Fetch, fetchReady, Validator,
   validate, describeValidation, isStandardSchema, VALIDATE,
+  createLogger, logSettings, logFormat, redact, REDACTED,
+  requestContext, runWithContext, getContext, getRequestId, addLogContext,
   appRoot, appPath, appHas, importApp, importAppDefault, resetAppRoot,
 } from '@averoa/utilities';
 
 import { appPath } from '@averoa/utilities/paths';         // path helpers only, safe in config files
+import { getRequestId } from '@averoa/utilities/context';   // request context only (Node built-ins)
 import Auth from '@averoa/utilities/AuthSandbox.js';        // per-request auth helper
 ```
 
@@ -206,7 +209,10 @@ import Auth from '@averoa/utilities/AuthSandbox.js';        // per-request auth 
 | `Queue(name, data, options?)` | Publishes a persistent message to a durable RabbitMQ queue and waits for the broker confirm. |
 | `closeQueue()` | Closes the shared AMQP channel and connection. |
 | `View` | The application's single Edge instance, mounted at `<app>/resources/views`. |
-| `Log` | winston logger writing to `<app>/storages/logs/averoa.log`. |
+| `Log` | winston logger: JSON lines to `<app>/storages/logs/averoa.log` and/or the console, with `requestId` and redaction. See [Log](#log). |
+| `createLogger(options?)`, `logSettings(env?)`, `logFormat(options?)` | Build another logger / read the logging settings / the format chain `Log` uses. |
+| `redact(value, { keys? })`, `REDACTED` | Redacted deep copy of a value, and the replacement string `'[REDACTED]'`. |
+| `requestContext`, `runWithContext(ctx, fn)`, `getContext()`, `getRequestId()`, `addLogContext(fields)` | The per-request `AsyncLocalStorage` context that `@averoa/core` opens for every request. |
 | `Fetch` | axios instance configured from `config/fetch.js` or env. |
 | `fetchReady` | Promise that settles once `config/fetch.js` has been applied. Same as `Fetch.ready`. |
 | `Validator` | The [validator](https://www.npmjs.com/package/validator) package. |
@@ -227,6 +233,7 @@ are not re-exported from the root but are useful in tests or custom setups:
 | `DB.js` | `databaseConfig` (live binding, `null` until loaded), `envDatabaseConfig`, `configImportsRoot` |
 | `Fetch.js` | `envFetchConfig` |
 | `FilterSearch.js` | `PublicError`, `errorResult`, `leftJoinRelations` |
+| `Log.js` | `contextFormat`, `redactFormat`, `redactionMatcher`, `DEFAULT_REDACT_KEYS` |
 
 ## Application files
 
@@ -242,7 +249,7 @@ the file is missing (or exports nothing) the environment fallback applies.
 | `app/Models/index.js` (named model exports) | `Crud` (model names) | none: required when you pass names |
 | `app/Providers/index.js` (`UploadProvider`) | `Crud` uploads | none: required when a request carries upload files |
 | `resources/views/**/*.edge` | `View`, `Mail.html()` | none |
-| `storages/logs/` | `Log` | created when missing |
+| `storages/logs/` | `Log` | created when missing (not with `LOG_CHANNEL=stdout`) |
 
 > **Config files must import helpers from `@averoa/utilities/paths`, never from `@averoa/utilities`.** The root
 > package loads `config/database.js` while it is itself being imported, so a config file that imports the root
@@ -897,19 +904,74 @@ const html = await View.render('emails/welcome', { name: 'Ada' });
 
 ### Log
 
-A [winston](https://github.com/winstonjs/winston) logger at level `LOG_LEVEL` (default `info`):
-
-- JSON lines to `<app>/storages/logs/averoa.log` (the directory is created when missing);
-- a console transport (simple format) unless `NODE_ENV === 'production'`;
-- if the log directory cannot be created (read-only filesystem), a warning is printed and only the console is used,
-  in every environment.
+A [winston](https://github.com/winstonjs/winston) logger at level `LOG_LEVEL` (default `info`).
 
 ```js
 import { Log } from '@averoa/utilities';
 
 Log.info('user created', { id: 1 });
-Log.error(err.stack);
+Log.warn('login failed', { email, password });   // password is logged as "[REDACTED]"
+Log.error(err);                                  // message + stack
 ```
+
+**Where** (`LOG_CHANNEL`):
+
+| `LOG_CHANNEL` | `<app>/storages/logs/averoa.log` | Console (stdout) |
+| --- | --- | --- |
+| unset (default, as in 2.0) | yes | unless `NODE_ENV=production` |
+| `file` | yes | no |
+| `stdout` | no (the directory is not created) | yes |
+| `both` | yes | yes |
+
+If the log directory cannot be created (read-only filesystem), a warning is printed and the console is used
+instead, in every environment. `@averoa/core` reads the same `LOG_CHANNEL` for its HTTP access log, so
+`LOG_CHANNEL=stdout` makes a container write nothing to disk.
+
+**Format.** The file always gets JSON lines. The console gets `LOG_FORMAT`: `json`, or `pretty` (one readable line,
+colored on a TTY unless `NO_COLOR` is set). The default is `pretty` when `NODE_ENV` is `development` or `test`, and
+`json` otherwise. Every line has `timestamp` (ISO 8601), `level` and `message`, plus `requestId` while a request is
+being handled, plus the meta fields you pass (keys are sorted):
+
+```json
+{"email":"ada@example.com","level":"warn","message":"login failed","password":"[REDACTED]","requestId":"4b0d6c1e-8a5f-4c39-9d0e-2f1c7a1b9e55","timestamp":"2026-11-16T09:30:00.000Z"}
+```
+
+```text
+2026-11-16T09:30:00.000Z warn [4b0d6c1e-8a5f-4c39-9d0e-2f1c7a1b9e55]: login failed {"email":"ada@example.com","password":"[REDACTED]"}
+```
+
+Errors (as the message or as meta) are logged with `message` and `stack`; an Error nested in meta becomes
+`{ name, message, stack }`.
+
+**Request context.** `@averoa/core` runs every request inside an `AsyncLocalStorage` context holding its request id,
+and `Log` adds it as `requestId` to every line written while that request is handled, across `await`, promises and
+timers, without passing `req` around. Outside a request there is no `requestId`. Related helpers:
+
+```js
+import { getRequestId, addLogContext, runWithContext } from '@averoa/utilities';
+
+getRequestId();                       // the current request id, or undefined
+addLogContext({ userId: req.user.id }); // added to every later line of this request
+await runWithContext({ requestId: job.id }, () => handle(job)); // your own context, e.g. a queue job
+```
+
+The context lives on `globalThis` under a registered symbol, so `@averoa/core` and this package share it even when
+they are different versions or installed twice. Explicit meta wins over context fields.
+
+**Redaction.** Before a line is written, the values of sensitive keys are replaced with `[REDACTED]`, at any depth
+and in arrays, without changing the object you passed. Keys are compared case-insensitively with everything but
+letters and digits removed (`X-Api-Key` → `xapikey`). A key is sensitive when it contains `authorization`, `cookie`,
+`password`, `passwd`, `passphrase`, `secret`, `token`, `apikey`, `privatekey`, `credential`, `sessionid` or `csrf`;
+is `pass`, `pwd`, `jwt`, `otp`, `auth` or `sid`; or ends with `pass` or `pwd` (`DB_PASS`). `LOG_REDACT` adds keys
+(comma separated, matched the same way: `LOG_REDACT=ssn,iban`). `Bearer` / `Basic` credentials inside strings
+(messages, stacks, values) are masked too, circular references become `[Circular]` and nesting deeper than 8 levels
+becomes `[Truncated]`. Redaction is a safety net, not a licence to log secrets: free text such as
+`` `password is ${password}` `` cannot be detected.
+
+`createLogger(options)` builds another logger with the same pipeline; every option defaults to the environment:
+`{ level, format: 'json' | 'pretty', channel: 'stdout' | 'file' | 'both' | null, dir, filename, stream, colors, redactKeys }`
+(`stream` writes the console output to any writable stream, which is handy in tests). `redact(value, { keys })`
+returns a redacted copy of any value.
 
 ### Fetch
 
@@ -1018,7 +1080,11 @@ only used when the matching `config/*.js` file does not exist or exports nothing
 | `FETCH_BASE_URL` | — | axios `baseURL`. |
 | `FETCH_TIMEOUT` | — | axios `timeout` in ms. |
 | `LOG_LEVEL` | `info` | winston level: `error`, `warn`, `info`, `http`, `verbose`, `debug`, `silly`. |
-| `NODE_ENV` | — | `production` turns on the Edge template cache and turns off the console log transport. |
+| `LOG_CHANNEL` | — | `stdout`, `file` or `both`. Unset: the file, plus the console unless `NODE_ENV=production`. |
+| `LOG_FORMAT` | `pretty` in `development` / `test`, else `json` | Console format of `Log`: `json` or `pretty`. Files are always JSON. |
+| `LOG_REDACT` | — | Extra sensitive keys for log redaction, comma separated. |
+| `NO_COLOR` | — | Any value disables colors in the `pretty` format. |
+| `NODE_ENV` | — | `production` turns on the Edge template cache and, with `LOG_CHANNEL` unset, turns off the console log transport. |
 
 ## Security notes
 
@@ -1045,7 +1111,8 @@ npm install
 npm test
 ```
 
-The suite uses `node:test` and an in-memory `better-sqlite3` database with the fixture app in `test/fixtures/`. AMQP
+The suite covers models, CRUD, filters, the DB loader, the queue, logging (format, channels, request context,
+redaction) and config import cycles. It uses `node:test` and an in-memory `better-sqlite3` database with the fixture app in `test/fixtures/`. AMQP
 and SMTP are replaced by in-process fakes, so no MySQL, RabbitMQ or mail server is needed.
 
 ## Upgrading
