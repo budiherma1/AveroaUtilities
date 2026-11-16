@@ -27,6 +27,7 @@
 - [DB](#db)
 - [Mail and the mail worker](#mail-and-the-mail-worker)
 - [Queue](#queue)
+- [Jobs and the scheduler](#jobs-and-the-scheduler)
 - [View, Log, Fetch and Validator](#view-log-fetch-and-validator)
 - [AuthSandbox](#authsandbox)
 - [Authorization (Gate)](#authorization-gate)
@@ -51,6 +52,8 @@
   against the model's columns, with pagination metadata.
 - **`validate()`**: request validation middleware for non-model input (body, query, params, headers) with any
   Standard Schema validator (zod, valibot, arktype) or Model-style field definitions.
+- **Jobs**: `Job` classes dispatched to RabbitMQ (with delays, retries, backoff and timeouts), a job worker and a
+  cron `Schedule`.
 - **Services**: `DB` (the app's knex instance), `Mail` and a mail queue worker, `Queue` (RabbitMQ), `View` (Edge),
   `Log` (winston), `Fetch` (axios), `Validator` (validator.js), a per-request auth helper and app-root path helpers.
 
@@ -77,10 +80,11 @@ npm install --save-dev @faker-js/faker   # only needed for seeders
 | Peer: `objection` | `^3.0.0` |
 | Peer: `edge.js` | `^5.0.0` |
 | Optional peer: `@faker-js/faker` | `>= 10.5.0` (seeders only) |
+| Optional peer: `croner` | `^10.0.0` (the scheduler only) |
 | Database driver | the one your knex client needs: `mysql2` (the default client), `pg`, `better-sqlite3`, ... |
 
 `amqplib`, `axios`, `nodemailer`, `validator` and `winston` are regular dependencies and are installed for you.
-RabbitMQ is only contacted when you publish to a queue or start the mail worker.
+RabbitMQ is only contacted when you publish to a queue, dispatch a job or start a worker.
 
 ## Quick start
 
@@ -183,6 +187,8 @@ import {
   Model, Crud, FilterSearch, FilterSearchError,
   DB, getDB, isDBReady,
   Mail, MailWorker, startMailWorker, Queue, closeQueue,
+  Job, JobTimeoutError, fakeJobs, exponentialBackoff, startJobWorker, retryFailedJobs,
+  Schedule, ScheduledEvent, startScheduler, runScheduleOnce,
   View, Log, Fetch, fetchReady, Validator,
   validate, describeValidation, isStandardSchema, VALIDATE,
   createLogger, logSettings, logFormat, redact, REDACTED,
@@ -210,6 +216,15 @@ import Auth from '@averoa/utilities/AuthSandbox.js';        // per-request auth 
 | `MailWorker` | The same function as `startMailWorker` (kept for the default-export style). |
 | `Queue(name, data, options?)` | Publishes a persistent message to a durable RabbitMQ queue and waits for the broker confirm. |
 | `closeQueue()` | Closes the shared AMQP channel and connection. |
+| `Job` | Base class for background jobs: `dispatch()`, `dispatchSync()`, `handle()`, `failed()`. See [Jobs and the scheduler](#jobs-and-the-scheduler). |
+| `JobTimeoutError` | Error of an attempt that ran longer than the job's `timeout`. |
+| `fakeJobs()` | Makes `dispatch()` record instead of publish (tests). Returns `{ dispatched, restore() }`. |
+| `exponentialBackoff(base?, max?)` | Backoff function for `static backoff`. |
+| `startJobWorker(options?)` | Consumes job queues and runs the jobs. Resolves to `{ queues, jobs, consumerTags, stop() }`. |
+| `retryFailedJobs(options?)` | Moves failed job records back to their queue. |
+| `Schedule`, `ScheduledEvent` | Scheduled task definitions. |
+| `startScheduler(options?)` | Runs a schedule until `stop()`. Needs the optional peer `croner`. |
+| `runScheduleOnce(options?)` | Runs the events due in the current minute once. |
 | `View` | The application's single Edge instance, mounted at `<app>/resources/views`. |
 | `Log` | winston logger: JSON lines to `<app>/storages/logs/averoa.log` and/or the console, with `requestId` and redaction. See [Log](#log). |
 | `createLogger(options?)`, `logSettings(env?)`, `logFormat(options?)` | Build another logger / read the logging settings / the format chain `Log` uses. |
@@ -236,6 +251,9 @@ are not re-exported from the root but are useful in tests or custom setups:
 | --- | --- |
 | `AuthSandbox.js` | `default` (`Auth(req)`), `AuthContext` |
 | `Queue.js` | `configureQueue({ url, heartbeat, driver })`, `publish`, `getConnection`, `getChannel` |
+| `Job.js` | `defaultJobQueue`, `resetJobConfig`, `validateQueueName`, `isJobClass`, `jobNameOf`, `normaliseDelay`, `backoffDelay`, `sendJob`, `failedQueueOf`, `MAX_DELAY` |
+| `JobWorker.js` | `loadJobs` |
+| `Schedule.js` | `loadSchedule` |
 | `Mail.js` | `setTransporter`, `getTransporter`, `loadMailConfig`, `defaultMailQueue`, `envMailConfig` |
 | `DB.js` | `databaseConfig` (live binding, `null` until loaded), `envDatabaseConfig`, `configImportsRoot` |
 | `Fetch.js` | `envFetchConfig` |
@@ -251,10 +269,12 @@ the file is missing (or exports nothing) the environment fallback applies.
 | --- | --- | --- |
 | `config/database.js` (knex config) | `DB` | `DB_CLIENT`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME` |
 | `config/mail.js` (nodemailer transport options, plus `queue`) | `Mail`, `startMailWorker` | `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_QUEUE` |
-| `config/queue.js` (`{ amqp, heartbeat }`) | `Queue`, `startMailWorker` | `RABBITMQ_SERVER` |
+| `config/queue.js` (`{ amqp, heartbeat, jobsQueue }`) | `Queue`, `startMailWorker`, `Job`, `startJobWorker` | `RABBITMQ_SERVER`, `JOBS_QUEUE` |
 | `config/fetch.js` (axios request config) | `Fetch` | `FETCH_BASE_URL`, `FETCH_TIMEOUT` |
 | `app/Models/index.js` (named model exports) | `Crud` (model names) | none: required when you pass names |
 | `app/Providers/index.js` (`UploadProvider`) | `Crud` uploads | none: required when a request carries upload files |
+| `app/Jobs/index.js` (named `Job` subclass exports) | `startJobWorker()` without `jobs` | none: pass `jobs` instead |
+| `app/Console/Kernel.js` (default export: the schedule) | `startScheduler()` / `runScheduleOnce()` without `schedule` | none: pass `schedule` instead |
 | `resources/views/**/*.edge` | `View`, `Mail.html()` | none |
 | `storages/logs/` | `Log` | created when missing (not with `LOG_CHANNEL=stdout`) |
 
@@ -895,6 +915,211 @@ Without a URL, `Queue()` rejects with
 `configureQueue({ url, heartbeat, driver })` from `@averoa/utilities/Queue.js` overrides these settings or swaps the
 amqplib driver.
 
+## Jobs and the scheduler
+
+Background jobs run on the same RabbitMQ connection as `Queue`. A job is a class with a `handle(payload)` method;
+`dispatch()` publishes it, `startJobWorker()` runs it in another process with retries, backoff, timeouts and a record
+of failures. `Schedule` dispatches jobs (or runs functions) on cron expressions.
+
+### Defining and dispatching jobs
+
+```js
+import { Job, exponentialBackoff } from '@averoa/utilities';
+
+export default class SendInvoiceJob extends Job {
+  static queue = 'billing';                        // default: config/queue.js `jobsQueue`, JOBS_QUEUE or 'jobs'
+  static tries = 5;                                // total attempts (default 1: no retry)
+  static backoff = exponentialBackoff(1000, 60000); // or 5000, or [1000, 5000, 30000]
+  static timeout = 30000;                          // ms per attempt (default: none)
+
+  async handle({ invoiceId }, { attempt, signal }) {
+    // ... honour `signal` (aborted on timeout) in long-running work
+  }
+
+  async failed({ invoiceId }, error) {
+    // called once, after the last attempt failed
+  }
+}
+
+await SendInvoiceJob.dispatch({ invoiceId: 7 });                                // run as soon as possible
+await SendInvoiceJob.dispatch({ invoiceId: 7 }, { delay: 10 * 60 * 1000 });     // in 10 minutes
+await SendInvoiceJob.dispatch({ invoiceId: 7 }, { delay: new Date('2026-12-01T09:00:00Z'), queue: 'urgent' });
+await SendInvoiceJob.dispatchSync({ invoiceId: 7 });                            // now, in this process
+```
+
+| Static property | Default | Description |
+| --- | --- | --- |
+| `jobName` | the class name | Name the job is published and registered under. Must be unique per worker. Set it if your build minifies class names. |
+| `queue` | `config/queue.js` `jobsQueue`, env `JOBS_QUEUE`, `'jobs'` | Queue name: letters, digits, `_ . : -`, at most 200 characters, not `amq.*`. |
+| `tries` | worker `tries`, else `1` | Total attempts, including the first. |
+| `backoff` | worker `backoff`, else `0` | Wait before a retry, in ms: a number, an array with one entry per retry (the last one repeats) or a function `(retry) => ms`. `exponentialBackoff(base, max)` returns `base`, `2 × base`, `4 × base`, ... capped at `max`. |
+| `timeout` | worker `timeout`, else none | Maximum run time of one attempt, in ms. |
+
+| Method | Description |
+| --- | --- |
+| `dispatch(payload?, { delay?, queue? })` | Publishes `{ id, job, payload, attempt: 0, dispatchedAt }` as a persistent JSON message and resolves to `{ id, job, queue, delay }` after the broker confirm. `delay` is ms or a `Date`. |
+| `dispatchSync(payload?)` | Runs `handle()` once in the current process, without RabbitMQ, retries or timeout, and resolves to its return value. On an error, `failed()` is called and the error is re-thrown. |
+| `handle(payload, context)` | The work. `context` is `{ id, name, queue, attempt, tries, signal }`; `attempt` starts at 1. |
+| `failed(payload, error, context)` | Optional. Called once when the last attempt has failed. Its own errors are logged. |
+
+**Payloads** must be JSON serialisable and should stay small: pass ids, not model instances. Both `dispatch()` and
+`dispatchSync()` send the payload through `JSON.stringify` / `JSON.parse`, so `Date`s arrive as ISO strings and
+`undefined` properties are dropped; a `BigInt` or a circular structure makes `dispatch()` reject before anything is
+published.
+
+**Delays** need no broker plugin. A delayed job is published to `<queue>.delay.<ms>`, a durable queue declared with
+`x-message-ttl: <ms>` and the default exchange as dead-letter exchange with `<queue>` as routing key. When the TTL
+expires, RabbitMQ moves the message to `<queue>`. All messages of a delay queue have the same TTL, so they expire in
+order. Delays are rounded up to whole seconds (so a few queues serve every dispatch) and may be at most 30 days. A delay
+queue deletes itself (`x-expires`) once it has not been declared for its delay plus 15 minutes; a process that
+publishes to it re-declares it at least every 5 minutes, so it never expires while it still holds messages. Retries
+with a backoff use the same delay queues.
+
+**Tests.** `fakeJobs()` makes `dispatch()` record instead of publish:
+
+```js
+import { fakeJobs } from '@averoa/utilities';
+
+const fake = fakeJobs();
+await registerUser({ email: 'ada@example.com' });
+assert.equal(fake.dispatched[0].job, 'SendWelcomeEmailJob');   // { id, job, payload, queue, delay }
+fake.restore();
+```
+
+### Running a job worker
+
+```js
+import { startJobWorker, closeQueue } from '@averoa/utilities';
+
+const worker = await startJobWorker({ concurrency: 5 });   // jobs: Job exports of app/Jobs/index.js
+
+process.on('SIGTERM', async () => {
+  await worker.stop();
+  await closeQueue();
+});
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `jobs` | the `Job` subclasses exported by `app/Jobs/index.js` | Job classes to run: an array, or an object such as `import * as jobs from '#jobs'` (exports that are not `Job` subclasses are ignored). |
+| `queues` | the queues of those classes | Queues to consume (declared durable). |
+| `concurrency` (or `prefetch`) | `1` | Jobs run at the same time per queue (AMQP prefetch). |
+| `tries`, `backoff`, `timeout` | `1`, `0`, none | Defaults for job classes that do not set them. |
+| `reconnectDelay` | `1000` | First reconnect delay in ms. |
+| `maxReconnectDelay` | `30000` | Reconnect delay cap in ms. |
+
+It resolves to `{ queues, jobs, consumerTags, stop() }`. Behaviour:
+
+- **Lookup by name only.** A message names its job; the worker finds the class in a `Map` built at startup from the
+  classes it was given. Message content never chooses a file to import or code to evaluate, and two classes with the
+  same name are a startup error.
+- **Success:** the message is acked.
+- **Failure** (a thrown error, a rejected promise or a timeout): while `attempt < tries`, the message is re-published
+  with `attempt + 1` after the job's `backoff` (directly to the queue when the backoff is 0) and the original is
+  acked. After the last attempt, a record is published to `<queue>.failed`, the original is acked and `failed()` is
+  called.
+- **At least once:** a retry or failed record is published and confirmed before the original is acked. If that
+  publish fails, the original is requeued and the attempt runs again. A worker that dies while a job runs leaves the
+  message unacked, and RabbitMQ delivers it again. Write `handle()` so that running it twice is harmless.
+- **Timeout:** the attempt fails with `JobTimeoutError` and `context.signal` is aborted. JavaScript cannot kill a
+  running function: a handler that ignores the signal keeps running in the background while the retry is scheduled.
+- **Unknown job names and malformed messages** are moved to `<queue>.failed` (unknown names stay retryable, for
+  example after a deploy that adds the class). If even that publish fails, an unknown job is requeued and a malformed
+  message is dropped.
+- **Broker restarts and errors** are handled like the mail worker: the consumers are re-created with exponential
+  backoff, a channel error does not crash the process, and `startJobWorker()` rejects if the first connection fails.
+- **`stop()`:** cancels the consumers and pending reconnects, waits for the running jobs, then closes the worker's
+  channel. The shared connection stays open; call `closeQueue()` to close it.
+
+### Failed jobs
+
+Jobs that failed for good are kept in RabbitMQ, in the durable queue `<queue>.failed`, as JSON records:
+
+```json
+{ "id": "…", "job": "SendInvoiceJob", "queue": "billing", "payload": { "invoiceId": 7 }, "attempt": 5,
+  "failedAt": "2026-11-16T10:00:00.000Z", "error": { "name": "Error", "message": "…", "stack": "…" } }
+```
+
+A queue rather than a `failed_jobs` table: jobs already depend on RabbitMQ but not on a database (or a schema
+migration), the record is written on the same confirm channel before the job is acked, and the queue can be inspected
+and purged with the RabbitMQ management UI or `rabbitmqctl`. To keep failures in a database as well, insert a row in
+the job's `failed()` hook.
+
+`retryFailedJobs({ queue?, limit? })` moves records from `<queue>.failed` back to `<queue>` with a fresh attempt count
+and resolves to the number moved. Records are always re-published to the queue they were read for, never to a queue
+named in the record. Records of malformed messages stay in the failed queue.
+
+### Scheduling
+
+```js
+// app/Console/Kernel.js
+import { PruneSoftDeletedJob, SendReportJob } from '#jobs';
+
+export default function schedule(schedule) {
+  schedule.job(PruneSoftDeletedJob, { days: 30 }).dailyAt('03:00');
+  schedule.job(SendReportJob).cron('0 8 * * 1-5').timezone('Asia/Jakarta');
+  schedule.call(() => refreshCache(), 'refresh-cache').everyFiveMinutes().withoutOverlapping();
+}
+```
+
+```js
+import { startScheduler } from '@averoa/utilities';
+
+const scheduler = await startScheduler();   // schedule: app/Console/Kernel.js
+// later: await scheduler.stop();
+```
+
+| `Schedule` method | Description |
+| --- | --- |
+| `job(JobClass, payload?, { queue?, delay? }?)` | Dispatch the job on each occurrence. The job runs on a job worker, not in the scheduler. |
+| `call(fn, name?)` | Run `fn()` (may be async) in the scheduler process. |
+
+| Event method | Cron |
+| --- | --- |
+| `cron(expression)` | Any 5-field expression, or 6 fields with seconds first |
+| `everyMinute()` (the default), `everyTwoMinutes()`, `everyFiveMinutes()`, `everyTenMinutes()`, `everyFifteenMinutes()`, `everyThirtyMinutes()` | `* * * * *`, `*/2 * * * *`, ... |
+| `hourly()`, `hourlyAt(minute)` | `0 * * * *`, `<minute> * * * *` |
+| `daily()`, `dailyAt('HH:MM')` | `0 0 * * *`, `<MM> <HH> * * *` |
+| `weekly()`, `weeklyOn(day, 'HH:MM')` | Sunday 00:00; `day` 0 (Sunday) to 6 |
+| `monthly()`, `monthlyOn(day, 'HH:MM')` | The 1st at 00:00; `day` 1 to 31 |
+| `timezone(tz)` | IANA time zone of this event |
+| `withoutOverlapping()` | Skip an occurrence while the previous run of this event is still running in this process. For `job()` events it only covers the dispatch, not the job itself. |
+| `name(text)` | Name used in logs and passed to the `lock` hook (default: the job name or the function name) |
+
+`startScheduler({ schedule?, timezone?, lock?, maxSleep? })`:
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `schedule` | the default export of `app/Console/Kernel.js` | A `Schedule`, a function `(schedule) => void`, or an object or class with a `schedule(schedule)` method. |
+| `timezone` | env `SCHEDULE_TIMEZONE`, else the process time zone | Time zone of events that do not set one. |
+| `lock` | none | `(event, scheduledAt) => boolean \| Promise<boolean>`, called before every run (`event.description` is the event name); a falsy result (or an error) skips it. |
+| `maxSleep` | `60000` | Longest single wait in ms, so clock changes are noticed. |
+
+It resolves to `{ events, stop() }`; `events` lists `{ name, expression, timezone, overlapping, nextRun }`. An invalid
+expression or time zone makes `startScheduler()` reject and names the event. The scheduler sleeps until the next
+due time, runs every event that is due, and logs (never throws) task errors. Occurrences missed while the process was
+stopped or asleep are not caught up. `stop()` stops scheduling and waits for running tasks.
+
+`runScheduleOnce({ schedule?, timezone?, lock?, at? })` runs the events due in the current minute once, waits for them
+and resolves to their names. Use it when a system cron or a Kubernetes CronJob starts the process every minute instead
+of keeping a scheduler running.
+
+**Run one scheduler.** Every running scheduler fires every event, so run exactly one scheduler process per
+application (job workers can be scaled freely). For more than one, for availability, pass a `lock` backed by a shared
+store so only one of them runs each occurrence, for example with Redis:
+
+```js
+await startScheduler({
+  lock: (event, at) => redis.set(`schedule:${event.description}:${at.getTime()}`, '1', { NX: true, PX: 60000 })
+    .then((ok) => ok === 'OK'),
+});
+```
+
+Cron expressions are parsed by [croner](https://github.com/hexagon/croner) (standard day-of-month **or** day-of-week
+matching, IANA time zones, no dependencies). It is an optional peer dependency, loaded when the scheduler starts:
+install it with `npm install croner` in applications that schedule tasks. Without it, `startScheduler()` rejects with
+an error that says so. `Job` and the worker do not need it.
+
 ## View, Log, Fetch and Validator
 
 ### View
@@ -1229,7 +1454,9 @@ only used when the matching `config/*.js` file does not exist or exports nothing
 | `MAIL_USERNAME` | — | SMTP user; when unset, no auth is configured. |
 | `MAIL_PASSWORD` | — | SMTP password. |
 | `MAIL_QUEUE` | `mail` | Default mail queue, used when `config/mail.js` has no `queue`. |
-| `RABBITMQ_SERVER` | — | AMQP URL, used when `config/queue.js` has no `amqp`/`url`. Required for `Queue` and the mail worker. |
+| `RABBITMQ_SERVER` | — | AMQP URL, used when `config/queue.js` has no `amqp`/`url`. Required for `Queue`, jobs and the workers. |
+| `JOBS_QUEUE` | `jobs` | Default job queue, used when `config/queue.js` has no `jobsQueue`. |
+| `SCHEDULE_TIMEZONE` | the process time zone | Default IANA time zone of the scheduler. |
 | `FETCH_BASE_URL` | — | axios `baseURL`. |
 | `FETCH_TIMEOUT` | — | axios `timeout` in ms. |
 | `LOG_LEVEL` | `info` | winston level: `error`, `warn`, `info`, `http`, `verbose`, `debug`, `silly`. |
@@ -1256,6 +1483,9 @@ only used when the matching `config/*.js` file does not exist or exports nothing
   `$withTrashed`.
 - **Authorization** fails closed: `Gate` denies unknown abilities, missing policy methods, guests and any callback
   result other than `true`.
+- **Jobs** are resolved by name from the classes a worker was started with; message content is never used to import
+  a module or evaluate code. Queue names are validated, and failed records are only re-queued to the queue they were
+  read from.
 - **Relations** are limited to `static allowGraph`; deeper graphs, recursion and modifiers must be allowed
   explicitly.
 
@@ -1289,6 +1519,15 @@ npm run test:integration
 8.0 / 8.4 and PostgreSQL 16 / 17 service containers (with `TZ=Asia/Jakarta`, so the Node.js and server time zones
 differ). `.github/workflows/release.yml` publishes to npm when a `vX.Y.Z` tag matching `package.json` is pushed,
 after the same checks; it needs an `NPM_TOKEN` repository secret.
+
+
+`test/jobs.integration.test.js` runs the jobs, delays, retries, failed queue and scheduler against a real RabbitMQ.
+It is skipped unless `RABBITMQ_TEST_SERVER` is set:
+
+```bash
+docker run -d --rm --name averoa-rabbitmq -p 127.0.0.1:35672:5672 rabbitmq:4.1-alpine
+RABBITMQ_TEST_SERVER=amqp://guest:guest@127.0.0.1:35672 npm test
+```
 
 ## Upgrading
 

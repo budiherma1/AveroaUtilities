@@ -43,6 +43,7 @@
   },
   "peerDependencies": {
     "@faker-js/faker": ">=10.5.0",
+    "croner": "^10.0.0",
     "edge.js": "^5.0.0",
     "knex": "^3.0.0",
     "objection": "^3.0.0"
@@ -50,11 +51,15 @@
   "peerDependenciesMeta": {
     "@faker-js/faker": {
       "optional": true
+    },
+    "croner": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@faker-js/faker": "^10.5.0",
     "better-sqlite3": "^11.10.0",
+    "croner": "^10.0.1",
     "edge.js": "^5.5.1",
     "knex": "^3.1.0",
     "mysql2": "^3.24.6",
