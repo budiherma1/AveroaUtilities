@@ -39,6 +39,12 @@ jobs:
         run: npm install --no-audit --no-fund
       - name: Test
         run: npm test
+      - name: Lint
+        if: matrix.node == '24.x'
+        run: npm run lint
+      - name: Type check
+        if: matrix.node == '24.x'
+        run: npm run typecheck
 
   # test/integration/*.test.js against real servers (they skip without the URL variables)
   mysql:

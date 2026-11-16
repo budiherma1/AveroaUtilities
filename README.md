@@ -19,6 +19,7 @@
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Exports](#exports)
+- [TypeScript](#typescript)
 - [Application files](#application-files)
 - [Model](#model)
 - [Crud](#crud)
@@ -260,7 +261,38 @@ are not re-exported from the root but are useful in tests or custom setups:
 | `FilterSearch.js` | `PublicError`, `errorResult`, `leftJoinRelations` |
 | `Log.js` | `contextFormat`, `redactFormat`, `redactionMatcher`, `DEFAULT_REDACT_KEYS` |
 
-## Application files
+## TypeScript
+
+The package is plain JavaScript and ships hand-written declaration files (`*.d.ts`), so TypeScript and editors type
+the root package, the `paths`, `context` and `Log` entry points and every deep import (`@averoa/utilities/Job.js`)
+without extra packages. Use `"moduleResolution": "nodenext"` (or `"bundler"`).
+
+```ts
+import { Model, Crud, Job, validate, Gate } from '@averoa/utilities';
+import type { ColumnMap, JobContext, Middleware } from '@averoa/utilities';
+
+class Users extends Model {
+  static tableName = 'users';
+  static column: ColumnMap = {               // annotate it, so the callbacks are typed
+    email: { flag: { unique: true }, validation: [{ run: (v) => v.validator.isEmail(v.value), msg: 'invalid' }] },
+  };
+}
+
+class SendReportJob extends Job {
+  async handle(payload: { reportId: number }, context: JobContext) { /* ... */ }
+}
+await SendReportJob.dispatch({ reportId: 1 });      // the payload type comes from handle()
+const result = await Crud.findOne(Users, req);      // { status: true, data: Users } | { status: false, message, statusCode }
+```
+
+- `req`, `res` and `next` are typed with small structural types (`RequestLike`, `HttpRequest`, `HttpResponse`,
+  `NextFunction`, `Middleware`) that Express 4 and 5 objects satisfy, so `@types/express` is not needed. Properties
+  this package adds to `req` (`req.validated`, `req.dataReq`, ...) are on these types, not on Express' `Request`.
+- `DB`, `Model` and `Crud` use the types that `knex` and `objection` ship (which need `@types/node`); `Fetch` is an
+  axios instance and `View` an Edge instance. `Log` (a winston logger), the nodemailer transporter, the AMQP
+  connection and `Validator` are typed structurally with the members this package documents; install
+  `@types/validator` and import `validator` yourself if you need every validator.js function typed.
+
 
 All of these are optional. Each `config/*.js` file may export an object or a function `(process) => object`; when
 the file is missing (or exports nothing) the environment fallback applies.
@@ -1493,11 +1525,13 @@ only used when the matching `config/*.js` file does not exist or exports nothing
 
 ```bash
 npm install
-npm test
+npm test             # node:test suite
+npm run lint         # ESLint (eslint.config.js)
+npm run typecheck    # tsc: the *.d.ts files and test/types/*.ts
 ```
 
 The suite covers models, CRUD, filters, the DB loader, the queue, logging (format, channels, request context,
-redaction) and config import cycles. It uses `node:test` and an in-memory `better-sqlite3` database with the fixture app in `test/fixtures/`. AMQP
+redaction), config import cycles and that every `.d.ts` declares exactly its module's runtime exports. It uses `node:test` and an in-memory `better-sqlite3` database with the fixture app in `test/fixtures/`. AMQP
 and SMTP are replaced by in-process fakes, so no MySQL, RabbitMQ or mail server is needed.
 
 ### Integration tests
@@ -1515,7 +1549,8 @@ npm run test:integration
 
 ### Continuous integration
 
-`.github/workflows/ci.yml` runs `npm test` on Node.js 20, 22 and 24, and `npm run test:integration` against MySQL
+`.github/workflows/ci.yml` runs `npm test` on Node.js 20, 22 and 24 (plus `npm run lint` and `npm run typecheck` on
+Node.js 24), and `npm run test:integration` against MySQL
 8.0 / 8.4 and PostgreSQL 16 / 17 service containers (with `TZ=Asia/Jakarta`, so the Node.js and server time zones
 differ). `.github/workflows/release.yml` publishes to npm when a `vX.Y.Z` tag matching `package.json` is pushed,
 after the same checks; it needs an `NPM_TOKEN` repository secret.
@@ -1584,8 +1619,8 @@ The full list of changes is in [CHANGELOG.md](./CHANGELOG.md).
 ## Contributing
 
 Issues and pull requests are welcome at
-[github.com/budiherma1/AveroaUtilities](https://github.com/budiherma1/AveroaUtilities). Please run `npm test` before
-opening a pull request.
+[github.com/budiherma1/AveroaUtilities](https://github.com/budiherma1/AveroaUtilities). Please run `npm test`,
+`npm run lint` and `npm run typecheck` before opening a pull request.
 
 ## License
 

@@ -4,6 +4,15 @@
 
 ### Added
 
+- **TypeScript declarations.** Hand-written `.d.ts` files for every module (the runtime JavaScript is unchanged):
+  `"types"` and a `types` condition in every `exports` entry, and a `./*.js` pattern so deep imports
+  (`@averoa/utilities/Job.js`) are typed too. `req`/`res`/`next`, the logger, the nodemailer transporter and the AMQP
+  objects are structural types, so neither `@types/express` nor `@types/node` is required by these declarations;
+  `knex`, `objection`, `axios` and `edge.js` types come from those packages. `Job.dispatch()` / `dispatchSync()` take
+  the payload type of the job's `handle()`, `Crud` and `FilterSearch.model()` results carry the model type.
+- Development: ESLint 10 flat config (`npm run lint`), `npm run typecheck` (`tsc` over the declarations and
+  `test/types/usage.ts`), a test that every `.d.ts` declares exactly its module's runtime exports, and both steps in
+  CI.
 - **Background jobs.** `Job` base class (`static queue`, `tries`, `backoff`, `timeout`, `jobName`; `handle(payload,
   context)`, optional `failed(payload, error, context)`), `MyJob.dispatch(payload, { delay, queue })` on the shared
   AMQP connection and confirm channel of `Queue`, `MyJob.dispatchSync(payload)` (in-process, no broker),
