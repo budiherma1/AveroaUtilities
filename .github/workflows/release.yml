@@ -76,3 +76,7 @@ jobs:
           version="$(node -p "require('./package.json').version")"
           case "$version" in *-*) dist_tag=next ;; *) dist_tag=latest ;; esac
           npm publish --provenance --access public --tag "$dist_tag"
+      # npm logs why the trusted publishing token exchange failed only at verbose level
+      - name: Trusted publishing details
+        if: failure()
+        run: grep -hiE "oidc|trusted|provenance|E40[134]" ~/.npm/_logs/*.log | sed -E 's/(token|authorization)[^ ]*/\1=***/Ig' | tail -40 || true
