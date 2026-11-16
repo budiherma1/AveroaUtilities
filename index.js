@@ -1,4 +1,10 @@
 export { default as Log } from './Log.js';
+export {
+  createLogger, logSettings, logFormat, redact, REDACTED,
+} from './Log.js';
+export {
+  requestContext, runWithContext, getContext, getRequestId, addLogContext,
+} from './context.js';
 export { default as DB, getDB, isDBReady } from './DB.js';
 export { default as Mail } from './Mail.js';
 export { default as Queue, closeQueue } from './Queue.js';

@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added (observability)
+
+- **Request context.** New `context.js` (also `@averoa/utilities/context`): `requestContext` (`AsyncLocalStorage`,
+  shared with `@averoa/core` through a global registered symbol), `runWithContext()`, `getContext()`,
+  `getRequestId()` and `addLogContext()`.
+- **Structured logging.** Every `Log` line has `timestamp`, `level`, `message` and, during a request, `requestId`
+  (plus `addLogContext()` fields). `LOG_FORMAT=json|pretty` picks the console format (default `pretty` for
+  `development` / `test`, `json` otherwise); the file is always JSON. Errors are logged with `message` and `stack`.
+- **`LOG_CHANNEL=stdout|file|both`**: `stdout` writes no file (containers). Unset keeps the 2.0 behaviour (file, plus
+  the console unless `NODE_ENV=production`).
+- **Redaction.** Values of sensitive keys (authorization, cookie, password, secret, token, api key, csrf, ... at any
+  depth) are logged as `[REDACTED]`, `Bearer` / `Basic` credentials inside strings are masked; `LOG_REDACT` adds keys.
+  The logged objects are not modified.
+- New exports `createLogger`, `logSettings`, `logFormat`, `redact`, `REDACTED` and the context helpers.
+
+### Changed
+
+- The console output of `Log` outside production is now the `pretty` format (with timestamp and request id) instead
+  of winston's `simple` format; set `LOG_FORMAT=json` for JSON lines.
+
 ## 2.0.2
 
 ### Fixed
