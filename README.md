@@ -1,109 +1,117 @@
-<h1 align="center">@averoa/utilities</h1>
+<div align="center">
 
-<p align="center">
-  <b>Models, one-line CRUD and a query-string filter language for <a href="https://github.com/budiherma1/averoajs">AveroaJS</a>.</b><br>
-  Plus DB (Knex), Mail, Queue (RabbitMQ), View (Edge), Fetch (axios), Log (winston) and Validator.
-</p>
+<h1>@averoa/utilities</h1>
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/@averoa/utilities"><img src="https://img.shields.io/npm/v/@averoa/utilities?color=cb3837&logo=npm" alt="npm version"></a>
+<p>The data and services layer of AveroaJS: self-describing Objection models, one-line CRUD, a query-string filter language, and shared DB, mail, queue, view, log and HTTP clients.</p>
+
+<p>
+  <a href="https://www.npmjs.com/package/@averoa/utilities"><img src="https://img.shields.io/npm/v/@averoa/utilities" alt="npm version"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white" alt="Node.js >= 20">
-  <img src="https://img.shields.io/badge/express-5-000000?logo=express&logoColor=white" alt="Express 5">
-  <img src="https://img.shields.io/badge/module-ESM-f7df1e" alt="ESM only">
+  <img src="https://img.shields.io/badge/node-%3E%3D20-339933" alt="Node.js >= 20">
+  <a href="https://github.com/budiherma1/averoajs"><img src="https://img.shields.io/badge/part%20of-AveroaJS-6f42c1" alt="Part of AveroaJS"></a>
 </p>
 
----
+</div>
 
-> **Starting a new project?** Use the [AveroaJS boilerplate](https://github.com/budiherma1/averoajs). It already
-> uses this package. This page is the reference for the package itself.
+## Contents
 
-## ✨ Highlights
+- [Overview](#overview)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Exports](#exports)
+- [Application files](#application-files)
+- [Model](#model)
+- [Crud](#crud)
+- [FilterSearch](#filtersearch)
+- [DB](#db)
+- [Mail and the mail worker](#mail-and-the-mail-worker)
+- [Queue](#queue)
+- [View, Log, Fetch and Validator](#view-log-fetch-and-validator)
+- [AuthSandbox](#authsandbox)
+- [Path helpers](#path-helpers)
+- [Configuration](#configuration)
+- [Security notes](#security-notes)
+- [Testing](#testing)
+- [Upgrading](#upgrading)
+- [Related packages](#related-packages)
+- [Contributing](#contributing)
+- [License](#license)
 
-| | |
-| --- | --- |
-| 🧱 **Models that describe themselves**<br>One `static column` map drives migrations, seeders and request validation. | 🔎 **FilterSearch**<br>`?saldo:gte=1000&orderByDesc=id&$relations=[rooms]`, checked against the model's columns. |
-| ⚡ **Crud in one line**<br>`Crud.findAll('Teacher', req)` returns filtered, paginated JSON. Soft delete is built in. | 🙈 **Hidden columns**<br>`static hidden = ['password']` keeps a column out of JSON, `$select`, filters and `orderBy`. |
-| 📬 **Mail + queue**<br>Edge-templated mail, sent directly or queued, and a worker that retries failed sends. | 🧭 **Finds your app**<br>Locates the app root without `../../..` paths, so it works with pnpm, workspaces and monorepos. |
+## Overview
 
-## 📦 Install
+`@averoa/utilities` is the package an AveroaJS application imports for everything below the HTTP layer:
 
-```sh
-npm i @averoa/utilities knex objection edge.js mysql2
-npm i -D @faker-js/faker   # only for seeders
+- **`Model`**: an [Objection](https://vincit.github.io/objection.js/) model whose `static column` map drives
+  migrations, seeders and request validation, with hidden columns, soft delete and a relation whitelist.
+- **`Crud`**: `create`, `findAll`, `findOne`, `update` and `delete` for a model in one call each, with
+  mass-assignment protection and audit columns.
+- **`FilterSearch`**: a query-string filter language (`?saldo:gte=1000&orderByDesc=id&$relations=[rooms]`) checked
+  against the model's columns, with pagination metadata.
+- **Services**: `DB` (the app's knex instance), `Mail` and a mail queue worker, `Queue` (RabbitMQ), `View` (Edge),
+  `Log` (winston), `Fetch` (axios), `Validator` (validator.js), a per-request auth helper and app-root path helpers.
+
+The package finds the application through its root directory (see [Path helpers](#path-helpers)), reads optional
+`config/*.js` files from it and falls back to environment variables when they are missing.
+
+Most applications get it through the [AveroaJS boilerplate](https://github.com/budiherma1/averoajs), where
+[`@averoa/core`](https://github.com/budiherma1/AveroaCore) binds the models to the database and uses `View` as the
+Express render engine, and [`@averoa/routes`](https://github.com/budiherma1/AveroaRoute) attaches the model's
+validation hooks to `crud()` routes. This page is the reference for the package itself.
+
+## Installation
+
+```bash
+npm install @averoa/utilities knex objection edge.js mysql2
+npm install --save-dev @faker-js/faker   # only needed for seeders
 ```
 
-`knex` ^3, `objection` ^3 and `edge.js` ^5 are peer dependencies. `@faker-js/faker` is an optional peer, needed only
-for seeders. ESM only, Node >= 20.
-
-```js
-import {
-  Model, Crud, FilterSearch, DB, Mail, Queue, closeQueue, startMailWorker,
-  Fetch, Log, View, Validator, appPath, importApp,
-} from '@averoa/utilities';
-import { appRoot } from '@averoa/utilities/paths'; // paths only, no knex/config
-```
-
-<details>
-<summary><b>All exports</b></summary>
-
-| Export | What it is |
+| Requirement | Version |
 | --- | --- |
-| `Model` | Objection `Model` subclass with column definitions, migrations, seeders, validation and crud hooks |
-| `Crud` | `create`, `findAll`, `findOne`, `update`, `delete` for a model |
-| `FilterSearch`, `FilterSearchError` | query-string filtering and pagination for models or Knex builders |
-| `DB` | the app's Knex instance |
-| `Mail` | fluent nodemailer builder (direct or queued) |
-| `Queue`, `closeQueue` | publish to a durable RabbitMQ queue / close the shared connection |
-| `startMailWorker`, `MailWorker` | mail queue consumer |
-| `Fetch` | axios instance |
-| `Log` | winston logger |
-| `View` | the app's single Edge instance |
-| `Validator` | the [validator](https://www.npmjs.com/package/validator) package |
-| `appRoot`, `appPath`, `appHas`, `importApp`, `importAppDefault`, `resetAppRoot` | app-root helpers (also at `@averoa/utilities/paths`) |
+| Node.js | `>= 20` |
+| Module format | ESM only (`import`) |
+| Peer: `knex` | `^3.0.0` |
+| Peer: `objection` | `^3.0.0` |
+| Peer: `edge.js` | `^5.0.0` |
+| Optional peer: `@faker-js/faker` | `>= 10.5.0` (seeders only) |
+| Database driver | the one your knex client needs: `mysql2` (the default client), `pg`, `better-sqlite3`, ... |
 
-</details>
+`amqplib`, `axios`, `nodemailer`, `validator` and `winston` are regular dependencies and are installed for you.
+RabbitMQ is only contacted when you publish to a queue or start the mail worker.
 
-## 📁 App files
+## Quick start
 
-The app root is `AVEROA_ROOT`, or the nearest `package.json` above `process.cwd()`.
-These files are optional. The env fallbacks apply when a file is missing:
-
-| file | used by | fallback |
-|---|---|---|
-| `config/database.js` | `DB` | `DB_CLIENT` (mysql2), `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME` |
-| `config/mail.js` | `Mail`, `startMailWorker` | `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_QUEUE` |
-| `config/queue.js` (`{ amqp, heartbeat }`) | `Queue` | `RABBITMQ_SERVER` |
-| `config/fetch.js` (axios config) | `Fetch` | `FETCH_BASE_URL`, `FETCH_TIMEOUT` |
-| `app/Models/index.js` | `Crud` | — |
-| `app/Providers/index.js` (`UploadProvider`) | `Crud` uploads | — |
-| `resources/views/*.edge` | `View`, `Mail.html()` | — |
-
-Config files may export an object or a function `(process) => object`. `Log` writes to
-`<app>/storages/logs/averoa.log` (created if missing) at level `LOG_LEVEL`.
-
-## 🧱 Models
+A model, its migration and a controller that exposes it:
 
 ```js
+// app/Models/Users.js
 import { Model } from '@averoa/utilities';
 import Posts from './Posts.js';
 
 export default class Users extends Model {
   static tableName = 'users';
-  static timestamp = true;            // adds created_*/updated_*/deleted_* + soft delete
-  static hidden = ['password'];       // never serialized, never selectable/filterable
-  static allowGraph = '[posts]';      // optional; default = own relations, depth 1; false = none
-  static allowWithTrashed = false;    // allow ?$withTrashed=1
+  static timestamp = true;            // audit columns + soft delete (the default)
+  static hidden = ['password'];       // never serialized, selectable, filterable or orderable
 
   static column = {
-    id: { migration: (m) => m.table.increments(m.column).primary(), flag: { required: false } },
+    id: {
+      migration: (m) => m.table.increments(m.column).primary(),
+      flag: { required: false },
+    },
+    name: {
+      migration: (m) => m.table.string(m.column, 50),
+      seed: (f) => f.person.firstName(),
+      flag: { required: true },
+    },
     email: {
       migration: (m) => m.table.string(m.column, 100),
       seed: (f) => f.internet.email(),
-      flag: { required: true, unique: true },
       validation: [{ run: (v) => v.validator.isEmail(v.value), msg: 'email format required' }],
+      flag: { required: true, unique: true },
     },
-    password: { migration: (m) => m.table.string(m.column), flag: { required: true } },
+    password: {
+      migration: (m) => m.table.string(m.column, 100),
+      flag: { required: false },
+    },
   };
 
   static relationMappings = () => ({
@@ -112,166 +120,876 @@ export default class Users extends Model {
 }
 ```
 
-Bind knex once at startup (`@averoa/core` does this): `Model.knex(DB)`.
-
-| Column key | Purpose |
-| --- | --- |
-| `migration: (m) => ...` | `m.table`, `m.column`, `m.knex`, used by `Model.migrationUp(knex)` |
-| `seed: (f) => ...` | `f` is faker, used by `Model.seeder(number?, knex)` / `Model.seederCustom(number, cb, knex)` |
-| `validation: [{ run, msg }]` | `run({ validator, value })` returns `false` to fail with `msg` |
-| `flag` | `required` (default true), `unique`, `upload`, `search` (default true), `fillable` (allow writing the primary key from the request) |
+```js
+// app/Models/index.js — Crud resolves model names from here
+export { default as Users } from './Users.js';
+export { default as Posts } from './Posts.js';
+```
 
 ```js
-// database/migrations/xxxx_users.js
-import { Users } from '#models';
+// database/migrations/20240101000000_users.js
+import { Users } from '#models'; // package.json "imports": { "#models": "./app/Models/index.js" }
 
 export const up = Users.migrationUp.bind(Users);
 export const down = Users.migrationDown.bind(Users);
 ```
 
-With `timestamp !== false`, `migrationUp` adds `created_at`, `created_by`, `updated_at`, `updated_by`, `deleted_at`
-and `deleted_by` (using `ON UPDATE CURRENT_TIMESTAMP` on MySQL only), and every read skips soft-deleted rows.
+```js
+// app/Controllers/UserController.js
+import { Crud } from '@averoa/utilities';
 
-**Crud route middleware** (used by `@averoa/routes`): `checkParamId` (404), `validationRouter` (422),
-`mapRequest`. For your own code there is also `Model.validation(object, 'create' | 'update')`, which returns
-`{ status: true }` or `{ status: false, data: { column, message } }`.
+export default class UserController {
+  async findAll(req, res) { res.json(await Crud.findAll('Users', req)); }
+  async findOne(req, res) { res.json(await Crud.findOne('Users', req)); }
+  async create(req, res)  { res.json(await Crud.create('Users', req)); }
+  async update(req, res)  { res.json(await Crud.update('Users', req)); }
+  async delete(req, res)  { res.json(await Crud.delete('Users', req)); }
+}
+```
 
-## ⚡ Crud
+Bind the models to the database once at startup. `@averoa/core` does this for you; elsewhere (scripts, tests):
+
+```js
+import { Model, getDB } from '@averoa/utilities';
+
+Model.knex(await getDB());
+```
+
+With [`@averoa/routes`](https://github.com/budiherma1/AveroaRoute), `crud()` attaches the model's validation hooks
+to the routes:
+
+```js
+// routes/api.js
+router.crud('Users', 'users', () => {
+  router.get('/', 'UserController@findAll');
+  router.get('/:id', 'UserController@findOne');
+  router.post('/', 'UserController@create');
+  router.put('/:id', 'UserController@update');
+  router.delete('/:id', 'UserController@delete');
+});
+```
+
+A client can then call `GET /api/users?name:like=A%25&orderByDesc=id&limit=20&$relations=posts` (`@averoa/core`
+mounts `routes/api.js` under `/api`).
+
+## Exports
+
+```js
+import {
+  Model, Crud, FilterSearch, FilterSearchError,
+  DB, getDB, isDBReady,
+  Mail, MailWorker, startMailWorker, Queue, closeQueue,
+  View, Log, Fetch, fetchReady, Validator,
+  appRoot, appPath, appHas, importApp, importAppDefault, resetAppRoot,
+} from '@averoa/utilities';
+
+import { appPath } from '@averoa/utilities/paths';         // path helpers only, safe in config files
+import Auth from '@averoa/utilities/AuthSandbox.js';        // per-request auth helper
+```
+
+| Export | Description |
+| --- | --- |
+| `Model` | Objection `Model` subclass with column definitions, migrations, seeders, validation hooks, hidden columns and soft delete. |
+| `Crud` | Static `create`, `findAll`, `findOne`, `update`, `delete` for a model name or class. |
+| `FilterSearch` | `FilterSearch.model(Model, req, config?)` and `FilterSearch.knex(builder, req, config)`. |
+| `FilterSearchError` | Error class for invalid client filters; its message is safe to return to clients. |
+| `DB` | Callable proxy over the application's knex instance (`DB('users')`, `DB.raw()`, `DB.transaction()`). |
+| `getDB()` | Promise of the knex instance once `config/database.js` has loaded. Same promise as `DB.ready`. |
+| `isDBReady()` | `true` once the knex instance exists. |
+| `Mail` | Fluent nodemailer message builder; sends directly or through the mail queue. |
+| `startMailWorker(options?)` | Consumes the mail queue and sends each message. Resolves to `{ queue, consumerTag, stop() }`. |
+| `MailWorker` | The same function as `startMailWorker` (kept for the default-export style). |
+| `Queue(name, data, options?)` | Publishes a persistent message to a durable RabbitMQ queue and waits for the broker confirm. |
+| `closeQueue()` | Closes the shared AMQP channel and connection. |
+| `View` | The application's single Edge instance, mounted at `<app>/resources/views`. |
+| `Log` | winston logger writing to `<app>/storages/logs/averoa.log`. |
+| `Fetch` | axios instance configured from `config/fetch.js` or env. |
+| `fetchReady` | Promise that settles once `config/fetch.js` has been applied. Same as `Fetch.ready`. |
+| `Validator` | The [validator](https://www.npmjs.com/package/validator) package. |
+| `appRoot`, `appPath`, `appHas`, `importApp`, `importAppDefault`, `resetAppRoot` | App-root helpers, also available from `@averoa/utilities/paths`. |
+
+The `exports` map also allows deep imports of any module file (`@averoa/utilities/<File>.js`). Named exports that
+are not re-exported from the root but are useful in tests or custom setups:
+
+| Module | Named exports |
+| --- | --- |
+| `AuthSandbox.js` | `default` (`Auth(req)`), `AuthContext` |
+| `Queue.js` | `configureQueue({ url, heartbeat, driver })`, `publish`, `getConnection`, `getChannel` |
+| `Mail.js` | `setTransporter`, `getTransporter`, `loadMailConfig`, `defaultMailQueue`, `envMailConfig` |
+| `DB.js` | `databaseConfig` (live binding, `null` until loaded), `envDatabaseConfig`, `configImportsRoot` |
+| `Fetch.js` | `envFetchConfig` |
+| `FilterSearch.js` | `PublicError`, `errorResult`, `leftJoinRelations` |
+
+## Application files
+
+All of these are optional. Each `config/*.js` file may export an object or a function `(process) => object`; when
+the file is missing (or exports nothing) the environment fallback applies.
+
+| File | Used by | Fallback |
+| --- | --- | --- |
+| `config/database.js` (knex config) | `DB` | `DB_CLIENT`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASS`, `DB_NAME` |
+| `config/mail.js` (nodemailer transport options, plus `queue`) | `Mail`, `startMailWorker` | `MAIL_HOST`, `MAIL_PORT`, `MAIL_SECURE`, `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_QUEUE` |
+| `config/queue.js` (`{ amqp, heartbeat }`) | `Queue`, `startMailWorker` | `RABBITMQ_SERVER` |
+| `config/fetch.js` (axios request config) | `Fetch` | `FETCH_BASE_URL`, `FETCH_TIMEOUT` |
+| `app/Models/index.js` (named model exports) | `Crud` (model names) | none: required when you pass names |
+| `app/Providers/index.js` (`UploadProvider`) | `Crud` uploads | none: required when a request carries upload files |
+| `resources/views/**/*.edge` | `View`, `Mail.html()` | none |
+| `storages/logs/` | `Log` | created when missing |
+
+> **Config files must import helpers from `@averoa/utilities/paths`, never from `@averoa/utilities`.** The root
+> package loads `config/database.js` while it is itself being imported, so a config file that imports the root
+> package creates an import cycle. Since 2.0.0 the cycle no longer hangs (see [DB](#db)), but the database is then
+> initialised lazily and a warning is printed.
+
+## Model
+
+`Model` extends Objection's `Model`. Everything Objection offers (`query()`, `relationMappings`, `$beforeInsert`,
+transactions, ...) works as usual; this package adds the following static properties and methods.
+
+### Static properties
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `tableName` | — | Table name (Objection). |
+| `idColumn` | `'id'` | Primary key (Objection). |
+| `column` | — | Column definitions, keyed by column name. See below. |
+| `timestamp` | `undefined` (enabled) | Anything except `false` adds the audit columns and turns on soft delete. |
+| `hidden` | `[]` | Columns removed from JSON output and refused in `$select`, filters, `orderBy` and `groupBy`. They are not writable from requests unless flagged `writable: true`. |
+| `allowGraph` | `undefined` | Relation expression clients may request with `$relations`. `undefined`: the model's own `relationMappings` keys, depth 1. `false` or `''`: no relations. |
+| `allowWithTrashed` | `false` | `true` lets clients include soft-deleted rows with `$withTrashed=1`. |
+
+### Column definitions
+
+```js
+static column = {
+  email: {
+    migration: (m) => m.table.string(m.column, 100),
+    seed: (f) => f.internet.email(),
+    validation: [{ run: (v) => v.validator.isEmail(v.value), msg: 'email format required' }],
+    flag: { required: true, unique: true },
+  },
+};
+```
+
+| Key | Signature | Used by |
+| --- | --- | --- |
+| `migration` | `({ table, knex, column }) => void` | `migrationUp()`. `table` is the knex table builder, `column` the column name. |
+| `seed` | `(faker) => value` | `seeder()` and `seederCustom()`. Columns without `seed` are left to their database default. |
+| `validation` | `[{ run: ({ validator, value }) => boolean, msg }]` | `validationRouter` and `validation()`. `run` returning a falsy value adds `msg` to the errors. `value` is always a string (`String(value)`, or `JSON.stringify(value)` for `json` columns); `validator` is validator.js. |
+| `flag` | object | See the flag table. |
+
+### Flags
+
+| Flag | Default | Effect |
+| --- | --- | --- |
+| `required` | `true` | On create, the value must be present and not `''`, `null` or `undefined`. On update, it is only checked when the key is sent, and then may not be empty. Set `required: false` on the primary key. |
+| `unique` | `false` | `validationRouter` rejects a value that already exists in a non-soft-deleted row (excluding `req.params.id` on update) with `duplicate value <value>`. |
+| `upload` | `false` | The value comes from an uploaded file (`req.files`, field name = column name) instead of the body. When `required`, the file is only required on create. Uploads are stored by `Crud` through the app's `UploadProvider`. |
+| `json` | `false` | Allows objects and arrays. Without it, `validationRouter` and `validation()` reject them with `must be a scalar value`. |
+| `fillable` | `false` | Lets clients write the primary key. Without it the primary key is stripped from request bodies. |
+| `writable` | `false` | Lets clients write a column listed in `static hidden` (for example a password that `$beforeInsert` hashes). Its `required` flag and validators then apply. |
+| `search` | `true` | `false` excludes the column from the `Model.search()` helper. It does not affect the `:search` query operator. |
+
+### Timestamps and soft delete
+
+With `timestamp !== false`:
+
+- `migrationUp()` adds `created_at` (default now), `created_by`, `updated_at`, `updated_by`, `deleted_at` and
+  `deleted_by`. On MySQL `updated_at` also gets `ON UPDATE CURRENT_TIMESTAMP`; other databases get a plain default.
+- Every read through this package ignores rows whose `deleted_at` is set: `FilterSearch`/`Crud.findAll`,
+  `Crud.findOne`, `checkParamId`, `Crud.update`, `Crud.delete`, the `unique` check and fetched or joined relations.
+- `Crud.delete` sets `deleted_at` and `deleted_by` instead of deleting the row.
+- The six audit columns are never writable from a request body, and they become selectable, filterable and orderable.
+
+With `timestamp: false`, no audit columns are created or set, and `Crud.delete` deletes the row.
+
+Soft-delete filtering is applied by this package's helpers. Your own `Model.query()` calls are plain Objection
+queries; add `.whereNull('deleted_at')` yourself where needed.
+
+### Migrations
+
+| Method | Description |
+| --- | --- |
+| `migrationUp(knex)` | `createTable(tableName)` running every column's `migration`, then the audit columns. Returns the schema builder. |
+| `migrationDown(knex)` | `dropTable(tableName)`. |
+
+### Seeders
+
+| Method | Description |
+| --- | --- |
+| `seeder(number?, knex)` | **Deletes every row of the table**, then inserts `number` rows (default `1`) built from each column's `seed(faker)`. `knex` is always the last argument. |
+| `seederCustom(number, cb, knex)` | Same, but `await cb()` runs for every row and its returned object overrides the generated values (only keys that are defined in `static column` are used; others are dropped). If no knex is bound to `Model` yet, `knex` is bound so that `cb` can query other models. |
+
+```js
+// database/seeds/1000-users.js
+import { Users } from '#models';
+
+export const seed = async (knex) => {
+  await Users.seeder(10, knex); // 10 rows, every value from `seed`
+};
+
+// or: 10 rows whose `role` comes from the callback, the rest from `seed`
+// await Users.seederCustom(10, async () => ({ role: 'member' }), knex);
+```
+
+Both methods empty the table first, so call only one of them per table and seed file.
+
+`@faker-js/faker` is loaded lazily on the first seeder call, so it can stay a dev dependency. Version 10.5.0 or
+later is required (earlier releases have a code-execution advisory in `helpers.fake`), and `seed` functions use the
+faker 10 API (`f.person.firstName()`, `f.number.int()`, ...). When faker is not installed the seeder throws
+`Model seeder needs @faker-js/faker (npm i -D @faker-js/faker)`.
+
+### Validation and route hooks
+
+`@averoa/routes` calls these three static methods for `crud()` routes. Each has the Express middleware signature
+plus an `additional` object `{ type: 'json' | 'multipart', create: boolean, pref }`.
+
+| Hook | Behaviour |
+| --- | --- |
+| `checkParamId(req, res, next)` | When `req.params.id` is set and no live row has that id, responds **404** `{ status: false, message: "ID 5 doesn't exist" }`. Otherwise calls `next()`. |
+| `validationRouter(req, res, next, additional)` | Validates `req.body` against `writableColumns()` (create mode when `additional.create === true`). On failure responds **422** `{ status: false, data: { column, message } }`. On success replaces `req.body` with only the writable columns, keeps the original in `req.bodyRaw`, and puts matching upload files in `req.dataFiles`. A missing `req.body` is treated as `{}`. |
+| `mapRequest(req, res, next, additional)` | Sets `req.dataReq = req.body`, `req.routeData = additional.pref` and, for multipart routes, `req.isFormData = true`. |
+
+The 422 `message` is the string `'required'` or `'must be a scalar value'`, or an array with every failed rule's
+`msg` and/or `duplicate value <value>`:
+
+```json
+{ "status": false, "data": { "column": "email", "message": ["email format required"] } }
+```
+
+`validationRouter` stops at the first failing column. Checks per column, in order: required, scalar (unless `json`),
+`unique`, then the `validation` rules.
+
+For your own code, `Model.validation(object, type = 'create')` applies the same required, scalar and rule checks to
+a plain object (no `unique` check, no database access) and returns `{ status: true }` or
+`{ status: false, data: { column, message } }`. In create mode it requires every column of `writableColumns()` whose
+`required` is not `false`, the same set `validationRouter` checks: the primary key (unless `fillable`) and hidden columns
+(unless `writable`) are not required.
+
+### Other static methods
+
+| Method | Description |
+| --- | --- |
+| `writableColumns()` | Columns a client may write: all of `column` except the audit columns, the primary key (unless `fillable`) and hidden columns (unless `writable`). |
+| `isDuplicate(column, value, exceptId?)` | `true` when a live row already has `value` in `column`. |
+| `filterSearch(req, config?)` | `FilterSearch.model(this, req, config)`. Override it to customise listing; `Crud.findAll` calls it. |
+| `search(query, term)` | Adds `orWhere(col, 'like', '%term%')` to `query` for every non-hidden column whose `search` flag is not `false`. |
+
+Hidden columns are removed in `$formatJson`, so they disappear from `toJSON()`, `JSON.stringify()` and `res.json()`
+(including nested relations) but stay readable as properties in your code (`user.password`).
+
+## Crud
 
 ```js
 import { Crud } from '@averoa/utilities';
 
-class TeacherController {
-  async findAll(req, res) { res.json(await Crud.findAll('Teacher', req)); }
-  async findOne(req, res) { res.json(await Crud.findOne('Teacher', req)); }
-  async create(req, res)  { res.json(await Crud.create('Teacher', req)); }
-  async update(req, res)  { res.json(await Crud.update('Teacher', req)); }
-  async delete(req, res)  { res.json(await Crud.delete('Teacher', req)); }
+await Crud.findAll('Users', req);                        // list, filtered and paginated from req.query
+await Crud.findOne('Users', req);                        // req.params.id
+await Crud.create('Users', req, { insert: { role: 'member' } });
+await Crud.update('Users', req, { update: { verified: true } }, trx);
+await Crud.delete('Users', req);                         // soft or hard, depending on `timestamp`
+```
+
+`model` is either a name exported from `app/Models/index.js` or a model class.
+
+| Method | `option` | Resolves to |
+| --- | --- | --- |
+| `findAll(model, req, option?)` | FilterSearch config: `maxLimit`, `limit` (default page size), `page` | `{ status: true, metadata, data }`, the DataTables shape (below), or `{ status: false, message, statusCode }` |
+| `findOne(model, req, option?)` | unused | `{ status: true, data }`, or `{ status: false, message: "ID 5 doesn't exist", statusCode: 404 }` when the id does not exist or is soft-deleted |
+| `create(model, req, option?, trx?)` | `insert`: object merged over the payload (its values win) | `{ status: true, data }` with the inserted model (hidden columns removed from JSON) |
+| `update(model, req, option?, trx?)` | `update`: object merged over the payload (`created_by`/`created_at` are dropped from it) | `{ status: true }`, or the same 404 result as `findOne` when no live row matched `req.params.id` |
+| `delete(model, req, option?, trx?)` | `update`: extra columns for the soft-delete patch (`created_by`/`created_at` are dropped from it) | `{ status: true }`, or the same 404 result as `findOne` when no live row matched |
+
+`trx` is an optional Objection/knex transaction, passed to `Model.query(trx)` for every query the method runs
+(including the read of the current row before an upload).
+
+### What gets written
+
+- **Payload.** When `req.dataReq` is an object (set by the `crud()` route hooks, or by your own code) it is trusted
+  and written as is. Otherwise the payload is taken from `req.body`, keeping only `writableColumns()`: no unknown
+  keys, no primary key (unless `fillable`), no audit columns, no hidden columns (unless `writable`).
+- **Audit columns** (models with `timestamp !== false`):
+  - `create` sets `created_by` and `updated_by` to `req.user.id` when `req.user` exists;
+  - `update` drops `created_by`/`created_at` from the payload (even from `req.dataReq` and `option.update`), sets
+    `updated_at` to now and `updated_by` to `req.user.id` when `req.user` exists;
+  - `delete` sets `deleted_at` to now and `deleted_by` to `req.user?.id ?? null`;
+  - `option.insert` on `create` may set `created_by`/`created_at`; `option.update` on `update` and `delete` cannot.
+- **Soft-deleted rows** are never updated or deleted again.
+
+### Uploads
+
+When `req.dataFiles` is set (by `validationRouter`, from `upload` columns), `create` and `update` load
+`UploadProvider` from `app/Providers/index.js` and store, for each file, the value returned by:
+
+```js
+await UploadProvider.upload(file, req.routeData);                // create
+await UploadProvider.upload(file, req.routeData, oldValue);      // update: oldValue = the column's current value
+```
+
+`file` is the multer file object and `req.routeData` is the route's `pref` (set by `mapRequest`).
+
+### DataTables mode
+
+`findAll` with `?$datatable=1` (also `true`, `yes` or `on`, in any case, or a boolean `true` set in code) returns the
+shape jQuery DataTables expects, echoing `?$draw=`:
+
+```json
+{ "draw": "3", "recordsTotal": 42, "recordsFiltered": 42, "data": [] }
+```
+
+Any other `$datatable` value, including `0` and `false`, gives a normal listing; `$datatable` and `$draw` are never
+treated as filters. `recordsTotal` and `recordsFiltered` are both the filtered item count. Paging still uses `limit` and `page`;
+DataTables' own `start`, `length`, `columns[...]` and `search[...]` parameters are ignored. The `_` cache buster is
+always ignored. Errors keep the `{ status: false, message, statusCode }` shape.
+
+### Error results
+
+`Crud` methods do not throw for request or database problems; they resolve to
+`{ status: false, message, statusCode }`:
+
+| Cause | `message` | `statusCode` |
+| --- | --- | --- |
+| Invalid filter, `$select`, `$relations`, ... (`FilterSearchError`) | the specific reason, e.g. `column password is not selectable` | `400` |
+| Objection `ValidationError` | the error's message | `422` |
+| No live row with `req.params.id` (`findOne`, `update`, `delete`) | `ID <id> doesn't exist` (as `checkParamId`) | `404` |
+| Objection `NotFoundError` | the error's message | `404` |
+| Unknown model name (`PublicError`) | `Model Nope not found in app/Models/index.js` | `500` |
+| Other `PublicError`, or any error with `expose === true` | the error's message | the error's `statusCode` (`400` when it has none) |
+| Database / driver error | `'Database error'` | `500` |
+| Anything else | `'Internal error'` | `500` |
+
+Database and unexpected errors are logged in full with `Log.error`; the client never sees the driver message, which
+can contain the SQL and bound values. `res.json()` alone always sends 200; use `statusCode` to send the matching
+status:
+
+```js
+const result = await Crud.findAll('Users', req);
+res.status(result.statusCode ?? 200).json(result);
+```
+
+Success results have no `statusCode`.
+
+## FilterSearch
+
+`FilterSearch` turns `req.query` into a filtered, ordered and paginated query. `Crud.findAll` uses it through
+`Model.filterSearch()`. It works on a copy of `req.query` and never mutates it (Express 5 exposes `req.query` as a
+getter).
+
+### Operators
+
+A filter key is `column`, `column:operator` or `col1|col2:operator`.
+
+| Key | SQL | Value |
+| --- | --- | --- |
+| `col=v` | `col = v` | scalar |
+| `col:eq=v` · `:neq` · `:lt` · `:lte` · `:gt` · `:gte` | `=` · `!=` · `<` · `<=` · `>` · `>=` | scalar |
+| `col:like=v` | `col like v` (MySQL: `?? like binary ?`, case-sensitive) | pattern; add `%` wildcards yourself (`%25` in a URL) |
+| `col:ilike=v` | `ilike` on PostgreSQL, `like` elsewhere | pattern |
+| `col:in=a,b,c` | `col in (a, b, c)` | comma-separated list |
+| `col:btwn=a,b` | `col between a and b` | exactly two comma-separated values |
+| `col:isNull=` · `col:notNull=` | `is null` · `is not null` | ignored |
+| `a\|b:search=w1 w2` | each word as `%word%` against each column, all joined with `OR` (`ilike` on PostgreSQL, `like` elsewhere) | space-separated words |
+| `a\|b:op=v` | the operator applied to each column, joined with `OR` | as for `op` |
+
+All values are bound as parameters. `:in` and `:btwn` also accept a repeated key (`?id:in=1&id:in=2`), but not an
+object or a nested value; for every other operator any object or array value is rejected. Both are rejected as
+`invalid value for <key>`. Object values only reach the filter when the app uses the `extended` query parser
+(`?id:in[a]=1`, `?name[x]=1`). With Express 5's default `simple` parser those keys arrive literally:
+`?name[x]=1` is an unknown key and is ignored, and `?id:in[a]=1` fails with `unknown operator in[a]`.
+
+Several filters are combined with `AND`:
+
+```text
+/users?status=active&saldo:gte=100000&created_at:btwn=2024-01-01,2024-12-31
+/users?name|email:search=ada%20london
+/users?email:like=%25%40example.com&orderByDesc=created_at&limit=20&page=2
+/users?deleted_by:isNull=&id:in=1,2,3
+```
+
+### Reserved parameters
+
+| Parameter | Description |
+| --- | --- |
+| `limit` | Page size, an integer `>= 0`. Default `10` (or `config.limit`). `0` means "all, up to `maxLimit`"; larger values are capped at `maxLimit`. |
+| `page` | Page number, an integer `>= 1`. Default `1` (or `config.page`). |
+| `orderBy=col` · `orderByDesc=col` | Sort by one own column (ascending / descending). When both are present, `orderByDesc` wins. |
+| `groupBy=col` | Group by one own column; the count becomes a distinct count of that column. |
+| `$select=a,b` | Return only these columns. Allowed: the model's columns (plus the audit columns on soft-delete models), minus hidden ones. |
+| `$relations=expr` | Load relations, as an Objection relation expression: `posts`, `[posts, profile]`, `posts.comments`. Validated against `static allowGraph`. |
+| `$relations-type=join` | Use `withGraphJoined` instead of `withGraphFetched`, and allow filters on `relation.column`. Any other value means fetch. |
+| `$withTrashed=1` | Include soft-deleted root rows (`1`, `true` or `yes`). Only on models with `static allowWithTrashed = true`; otherwise an error. Other values are ignored. |
+
+`Crud.findAll` additionally consumes `$datatable` and `$draw`.
+
+Column names may be qualified with the model's table (`users.id:gt=1`, `orderBy=users.name`).
+
+### Relations
+
+- `$relations` must fit `static allowGraph`: every relation name, nesting level, recursion and modifier in the
+  request must be present in the allowed expression. By default only the model's direct relations are allowed;
+  set `static allowGraph = '[posts.comments, profile]'` to allow more, or `false` to allow none. Models without
+  relations reject `$relations` (`relations are not allowed on this resource`).
+- Soft-deleted related rows are always excluded, at every level, and hidden columns of related models are removed
+  from the JSON.
+- With `$relations-type=join`, `relation.column` filters target a column of a directly requested relation (for
+  example `?$relations=posts&$relations-type=join&posts.title:like=%25node%25`). The relations are LEFT JOINed with
+  soft-deleted children excluded inside the join, so parents without live children are kept. Pagination and the
+  count are computed on distinct root rows, then the joined graph is loaded for that page.
+
+### Strict and ignored keys
+
+| Query key | Result |
+| --- | --- |
+| `col:op=v` on an unknown or hidden column | error `column <col> doesn't exist` |
+| `col:xyz=v` (unknown operator) on a known column | error `unknown operator xyz` |
+| `x:y=v` where no listed column is known | ignored (tracking parameters and the like) |
+| `col=v` on a known, non-hidden column | equality filter |
+| `name=v` on an unknown or hidden column (`?password=x`, `utm_source`, DataTables' `draw`, `columns[...]`) | ignored |
+| `_` | ignored |
+| bad `limit` / `page`, unknown `$select` column, disallowed `$relations` / `$withTrashed`, non-scalar value | error |
+
+Errors are returned as `{ status: false, message, statusCode }` (`400` for these), never thrown.
+
+### Response
+
+```json
+{
+  "status": true,
+  "metadata": {
+    "item_total": 42,
+    "per_page": 10,
+    "page_total": 5,
+    "current_page": 2,
+    "has_next_page": true,
+    "has_prev_page": true
+  },
+  "data": []
 }
 ```
 
-| Method | Returns |
-| --- | --- |
-| `Crud.findAll(model, req)` | `{ status, metadata, data }` via FilterSearch. With `?$datatable=1` (and `$draw`), it returns the DataTables shape `{ draw, recordsTotal, recordsFiltered, data }` |
-| `Crud.findOne(model, req)` | `{ status: true, data }`. Supports `$select` and `$relations` |
-| `Crud.create(model, req, { insert }?, trx?)` | `{ status: true, data }`. Uploads from `req.dataFiles` go through `UploadProvider` |
-| `Crud.update(model, req, { update }?, trx?)` | `{ status }`. Never overwrites `created_by` / `created_at`, sets `updated_at` / `updated_by` |
-| `Crud.delete(model, req, { update }?, trx?)` | `{ status }`. A soft delete (`deleted_at`, `deleted_by`), or a hard delete when `timestamp: false` |
+`per_page` is the smaller of the effective limit and `item_total`; `page_total` is at least `1`. A page past the end
+returns empty `data` with `has_next_page` and `has_prev_page` both `false`.
 
-`model` is a name from `app/Models/index.js` or a model class. Failures resolve to `{ status: false, message }`.
-`create`/`update` from a raw `req.body` only write known, non-hidden model columns. `req.dataReq`, which the crud route
-middleware sets, is trusted. `created_by` / `updated_by` / `deleted_by` come from `req.user.id`.
-
-## 🔎 Query string (FilterSearch / `Crud.findAll`)
-
-| Parameter | Meaning |
-| --- | --- |
-| `col=v` | equals |
-| `col:eq` · `:neq` · `:lt` · `:lte` · `:gt` · `:gte` `=v` | `=`, `!=`, `<`, `<=`, `>`, `>=` |
-| `col:like=v` | `like`, parameterized (`?? like binary ?` on MySQL) |
-| `col:ilike=v` | `ilike` on PostgreSQL, `like` elsewhere |
-| `col:in=a,b` | `in` |
-| `col:btwn=a,b` | `between` (exactly two values) |
-| `col:isNull=` · `col:notNull=` | `is null` / `is not null` |
-| `a\|b:search=words` | each word as `%word%` in any of the columns (`ilike` on PostgreSQL) |
-| `a\|b:op=v` | the operator on several columns, joined with `OR` |
-| `orderBy=col` · `orderByDesc=col` | sort (own columns only) |
-| `groupBy=col` | group (own columns only) |
-| `limit` | page size, default 10. `0` = all, up to `maxLimit` (default 1000) |
-| `page` | page number, >= 1 |
-| `$select=a,b` | columns (+ timestamp columns), minus hidden |
-| `$relations=[posts]` | relations, validated against `static allowGraph` |
-| `$relations-type=join` | join instead of fetch. Then `posts.title=x` filters on the relation |
-| `$withTrashed=1` | include soft-deleted rows, only with `static allowWithTrashed = true` |
-
-Examples:
-
-```text
-/api/teachers?saldo:gte=100000&orderByDesc=created_at&limit=20&page=2
-/api/teachers?teacher_name|address:search=ada%20london
-/api/teachers?$select=id,teacher_name&$relations=[rooms]
-```
-
-Unknown columns or operators, non-scalar values and invalid `limit` / `page` return `{ status:false, message }`
-instead of being silently ignored.
-
-Response: `{ status, metadata: { item_total, per_page, page_total, current_page, has_next_page, has_prev_page }, data }`
-or `{ status:false, message }`.
-
-Knex mode: `FilterSearch.knex(DB('users'), req, { column: [...], hidden: [...], timestamp: true, maxLimit })`.
-
-## 📬 Mail & queue
+### Programmatic use
 
 ```js
-await Mail.init().to('a@b.c').subject('Hi').html('emails/welcome', { name }).send();         // direct
-await Mail.init().to('a@b.c').subject('Hi').html('emails/welcome', { name }).queue().send(); // queued
+import { FilterSearch, DB } from '@averoa/utilities';
 
-const worker = await startMailWorker({ prefetch: 5, maxRetries: 3 });
-process.on('SIGTERM', async () => { await worker.stop(); await closeQueue(); });
+// a model (what Crud.findAll does)
+const result = await FilterSearch.model(Users, req, { maxLimit: 200 });
 
-await Queue('jobs', { any: 'json' }); // durable queue, persistent message, waits for confirm
+// any knex query builder, with an explicit column whitelist
+const report = await FilterSearch.knex(
+  DB('users as u').join('posts as p', 'p.user_id', 'u.id').select('u.id', 'u.name', 'p.title'),
+  req,
+  { column: ['u.id', 'u.name', 'p.title'], maxLimit: 500 },
+);
 ```
 
-`Mail` methods: `from`, `to`, `subject`, `html(viewOrHtml, vars)` (strings containing `<` are used as raw HTML),
-`text`, `attachments`, `additional`, `queue(name?)` and `send()`. `.queue()` with no name uses `config/mail.js`
-`queue`, env `MAIL_QUEUE`, or `'mail'`. The worker re-publishes a failed send up to `maxRetries` times, then rejects it,
-and drops malformed messages.
+| Config | Mode | Default | Description |
+| --- | --- | --- | --- |
+| `maxLimit` | both | `1000` | Upper bound for `limit` (a positive integer). |
+| `limit` | both | `10` | Page size when the request has no `limit`. |
+| `page` | both | `1` | Page when the request has no `page`. |
+| `column` | knex | required | Whitelist of filterable/selectable/orderable columns. Entries may be qualified (`'u.id'`), and requests then use the same name (`?u.id:eq=1`). Without it the result is `{ status: false, message: 'need to define column array', statusCode: 500 }`. |
+| `hidden` | knex | `[]` | Columns removed from the whitelist. When set and the request has no `$select`, the query selects the remaining whitelist columns explicitly. |
+| `timestamp` | knex | `false` | `true` adds the six audit columns to the whitelist and filters `<table>.deleted_at IS NULL` on the base table. |
+| `softDelete` | knex | `true` | With `timestamp: true`, `false` keeps the audit columns but skips the `deleted_at` filter. |
+| `table` | knex | derived | Table name or alias that qualifies the soft-delete filter. By default it is taken from the builder's single `FROM` table: `DB('users')` gives `users`, `DB('users as u')` and `DB({ u: 'users' })` give `u`. |
 
-## 🔑 Auth helper
+Knex mode does not support `$relations` or `$withTrashed`. The builder you pass is cloned, not modified, and the count
+runs on a copy without its `select` and `orderBy`, so it stays valid on PostgreSQL and MySQL `ONLY_FULL_GROUP_BY`.
+The soft-delete filter is qualified with that table (`u.deleted_at`), so it stays unambiguous when the builder joins
+other tables that have `deleted_at`; only the base table's rows are filtered. When the `FROM` is a raw expression or a
+subquery and `table` is not set, the filter uses the unqualified `deleted_at`.
+
+## DB
+
+`DB` is the application's knex instance, built from `config/database.js` (a knex config object, or a function
+`(process) => config`) or, when that file is missing, from env:
+
+```js
+{
+  client: process.env.DB_CLIENT || 'mysql2',
+  connection: { host: DB_HOST, port: Number(DB_PORT), user: DB_USER, password: DB_PASS, database: DB_NAME },
+}
+
+// DB_CLIENT=sqlite3 or better-sqlite3
+{
+  client: DB_CLIENT,
+  connection: { filename: DB_NAME || ':memory:' }, // relative names resolve against the app root
+  useNullAsDefault: true,
+}
+```
+
+For any other option (pool, SSL, a computed path, ...), write `config/database.js`.
+
+```js
+// config/database.js
+import { appPath } from '@averoa/utilities/paths'; // not '@averoa/utilities'
+
+export default ({ env }) => ({
+  client: 'better-sqlite3',
+  connection: { filename: env.DB_NAME || appPath('storages', 'app.sqlite') },
+  useNullAsDefault: true,
+});
+```
+
+`DB` is a callable proxy: `DB('users')`, `DB.raw()`, `DB.transaction()`, `DB.schema`, `DB.destroy()` and
+`Model.knex(DB)` all forward to the real instance.
+
+### Readiness
+
+How `config/database.js` is loaded decides when `DB` is usable:
+
+| Situation | Behaviour |
+| --- | --- |
+| No `config/database.js` | `DB` is built synchronously from env while the package is imported. |
+| The config file does not import `@averoa/utilities` | It is awaited while the package is imported, for at most `AVEROA_CONFIG_WAIT_MS` (default 2000 ms). Normally `DB` is ready as soon as the import resolves. |
+| The config file imports `@averoa/utilities` (root) | Not awaited: `DB` is initialised in the background and a warning recommends `@averoa/utilities/paths`. |
+| The wait times out (for example an indirect import cycle) | A warning is printed and loading continues in the background. |
+
+Code that may run before the instance exists should wait for it:
+
+```js
+import { DB, getDB, isDBReady } from '@averoa/utilities';
+
+const knex = await getDB();   // or: await DB.ready
+isDBReady();                  // true once the instance exists
+```
+
+Before then, calling `DB()` or reading most of its properties throws
+`DB is not ready yet (config/database.js is still loading)`; `DB.destroy()` waits for the instance instead. If the
+config file fails to load, the error is printed as a warning, `getDB()` rejects with it, and using `DB` throws it.
+
+If the driver package for a known client (`mysql2`, `pg`, `better-sqlite3`, `sqlite3`, `tedious`, `oracledb`, ...)
+is not installed, a warning is printed and `DB` is a connection-less knex: the app still starts, building queries
+works (`.toString()`), and running them fails.
+
+## Mail and the mail worker
+
+### Sending mail
+
+```js
+import { Mail } from '@averoa/utilities';
+
+// send now
+await Mail.init()
+  .from('noreply@example.com')
+  .to('ada@example.com')
+  .subject('Welcome')
+  .html('emails/welcome', { name: 'Ada' })   // resources/views/emails/welcome.edge
+  .send();
+
+// publish to the mail queue; a worker sends it
+await Mail.init().to('ada@example.com').subject('Welcome').html('<p>Hi Ada</p>').queue().send();
+```
+
+| Method | Description |
+| --- | --- |
+| `Mail.init()` | New message builder. |
+| `from(address)`, `to(address)`, `subject(text)`, `text(body)` | nodemailer message fields. |
+| `html(viewOrHtml, variables?)` | An Edge template name rendered with `variables` through `View`, or a raw HTML string (any string containing `<` is used as is). Render errors are logged and make `send()` reject. |
+| `attachments(list)` | nodemailer attachments. |
+| `additional(options)` | Extra nodemailer message options, spread last (they override the fields above). |
+| `queue(name?)` | Publish to a queue instead of sending. Without a name: `config/mail.js` `queue`, then env `MAIL_QUEUE`, then `'mail'`. |
+| `build()` | Resolves to the nodemailer message options (HTML rendered). |
+| `send()` | Direct: resolves to nodemailer's `sendMail` info. Queued: publishes the message options as JSON and resolves to `{ status: 'queued', channel, data }` after the broker confirm. |
+
+The transporter is created once per process, on first use, from `config/mail.js` (nodemailer transport options; the
+`queue` and `amqp` keys are removed) or from the `MAIL_*` env vars. `setTransporter()` from
+`@averoa/utilities/Mail.js` replaces it (tests, custom transports).
+
+### Running the worker
+
+```js
+import { startMailWorker, closeQueue } from '@averoa/utilities';
+
+const worker = await startMailWorker({ prefetch: 5, maxRetries: 3 });
+
+process.on('SIGTERM', async () => {
+  await worker.stop();
+  await closeQueue();
+});
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `queue` | `config/mail.js` `queue`, env `MAIL_QUEUE`, `'mail'` | Queue to consume (declared durable). |
+| `prefetch` | `1` | Unacknowledged messages handled at the same time. |
+| `maxRetries` | `3` | Re-publishes after a failed send; a message gets at most `maxRetries + 1` attempts. |
+| `transporter` | the shared transporter | Any object with `sendMail(options)`. |
+| `reconnectDelay` | `1000` | First reconnect delay in ms. |
+| `maxReconnectDelay` | `30000` | Reconnect delay cap in ms. |
+
+It resolves to `{ queue, consumerTag, stop() }`. Behaviour:
+
+- **Success:** the message is acked. The ack happens outside the send's error handling, so an ack failure is logged
+  and never causes the mail to be sent twice.
+- **Send failure:** the message is re-published to the end of the same queue with an `x-averoa-retries` header and
+  the original is acked. After `maxRetries` re-publishes it is rejected without requeue (it goes to the queue's
+  dead-letter exchange, if one is configured). If re-publishing itself fails, the original is requeued.
+- **Malformed message** (not JSON): rejected without requeue.
+- **Attachments:** `Buffer` contents survive the JSON round trip and are restored before sending.
+- **Broker restarts and errors:** channel and connection `error`/`close` events are handled (a channel error does
+  not crash the process) and the consumer is re-created with exponential backoff, from `reconnectDelay` doubling up
+  to `maxReconnectDelay`. A consumer cancelled by the broker is re-created the same way. `consumerTag` always
+  reflects the current consumer.
+- **Startup:** if the first connection fails, `startMailWorker()` rejects and does not retry in the background.
+- **`stop()`:** cancels pending reconnects and the consumer, waits for in-flight sends, then closes the worker's
+  channel. The shared connection stays open; call `closeQueue()` to close it.
+
+## Queue
+
+```js
+import { Queue, closeQueue } from '@averoa/utilities';
+
+await Queue('reports', { reportId: 42 });                 // JSON, application/json
+await Queue('logs', 'plain text');                        // text/plain
+await Queue('images', buffer, { priority: 5 });           // raw Buffer, extra amqplib publish options
+```
+
+`Queue(name, data, options?)` declares `name` as a durable queue (once per channel), publishes `data` as a
+persistent message on a confirm channel and resolves to `true` once the broker confirms. Strings are sent as
+`text/plain`, Buffers as is, anything else as JSON. `options` are amqplib publish options and override the defaults.
+
+The process shares one AMQP connection and one confirm channel, opened lazily on the first publish. Both are dropped
+on `close`/`error` and re-opened on the next publish. `closeQueue()` closes them (graceful shutdown, tests).
+
+| Setting | Source |
+| --- | --- |
+| Server URL | `config/queue.js` `amqp` (or `url`), then env `RABBITMQ_SERVER` |
+| Heartbeat (seconds) | `config/queue.js` `heartbeat`, default `5` |
+
+Without a URL, `Queue()` rejects with
+``Queue: no AMQP server configured (config/queue.js `amqp` or env RABBITMQ_SERVER)``. For tests,
+`configureQueue({ url, heartbeat, driver })` from `@averoa/utilities/Queue.js` overrides these settings or swaps the
+amqplib driver.
+
+## View, Log, Fetch and Validator
+
+### View
+
+The application's single Edge instance. Templates are mounted from `<app>/resources/views`, and compiled templates
+are cached when `NODE_ENV === 'production'`. `@averoa/core` registers it as the Express view engine and `Mail.html()`
+renders with it.
+
+```js
+import { View } from '@averoa/utilities';
+
+const html = await View.render('emails/welcome', { name: 'Ada' });
+```
+
+### Log
+
+A [winston](https://github.com/winstonjs/winston) logger at level `LOG_LEVEL` (default `info`):
+
+- JSON lines to `<app>/storages/logs/averoa.log` (the directory is created when missing);
+- a console transport (simple format) unless `NODE_ENV === 'production'`;
+- if the log directory cannot be created (read-only filesystem), a warning is printed and only the console is used,
+  in every environment.
+
+```js
+import { Log } from '@averoa/utilities';
+
+Log.info('user created', { id: 1 });
+Log.error(err.stack);
+```
+
+### Fetch
+
+An [axios](https://axios-http.com/) instance. When `config/fetch.js` exists (an axios request config object, or a
+function `(process) => config`) it is loaded in the background and merged into `Fetch.defaults`; request methods
+(`Fetch()`, `get`, `post`, `put`, `patch`, `delete`, `head`, `options`, `request`, `postForm`, ...) called earlier
+wait for it. `Fetch.ready` (also exported as `fetchReady`) settles once it has been applied. A config that fails to
+load prints a warning and leaves the defaults unchanged.
+
+Without `config/fetch.js`, `FETCH_BASE_URL` sets `baseURL` and `FETCH_TIMEOUT` sets `timeout` (ms).
+
+```js
+import { Fetch } from '@averoa/utilities';
+
+const { data } = await Fetch.get('/users/1');
+```
+
+### Validator
+
+The [validator](https://www.npmjs.com/package/validator) package, the same object column rules receive as
+`v.validator`.
+
+```js
+import { Validator } from '@averoa/utilities';
+
+Validator.isEmail('ada@example.com'); // true
+```
+
+## AuthSandbox
+
+A per-request helper over [passport](https://www.passportjs.org/)'s request API. It is not re-exported from the root;
+import it directly and create one per request:
 
 ```js
 import Auth from '@averoa/utilities/AuthSandbox.js';
 
-const auth = Auth(req); // one per request
-if (auth.check()) auth.user();
+const auth = Auth(req);
+if (auth.check()) {
+  const user = auth.user();
+}
 await auth.logout();
 ```
 
-## 🧪 Tests
-
-`npm test` (node:test + better-sqlite3, no MySQL/RabbitMQ needed).
-
-## 🆙 Upgrading from 1.x
-
-2.x requires Node >= 20 (2.0.0 allowed 18.17) and is ESM only. The full list of breaking changes is in
-[CHANGELOG.md](./CHANGELOG.md).
-
-<details>
-<summary><b>Highlights</b></summary>
-
-- **No more `./../../../` imports.** App files are found through `@averoa/utilities/paths`.
-- **HTTP status codes** in crud middleware: `validationRouter` → **422**, `checkParamId` → **404** (both were 200).
-- **Soft delete is enforced** for every model with `timestamp !== false`. `Crud.delete` hard-deletes models with
-  `timestamp: false`.
-- **`static hidden`**, a strict **`$select`**, and **`$relations`** validated against `static allowGraph`.
-- **Filters are strict**: unknown columns, operators and bad values return `{ status:false, message }`.
-- **`limit`** is capped by `maxLimit` (default 1000). `limit=0` means "all, up to maxLimit".
-- **`:like`** is parameterized. `:ilike` and `:search` use `ilike` on PostgreSQL.
-- **`$relations-type=join`** paginates on root rows.
-- **Crud** writes only known columns from a raw body, and models load from `app/Models/index.js` (no more
-  `@averoa/models`). `moment` was removed.
-- **Queue** uses one lazy connection, durable queues and persistent messages. `Queue()` resolves after the broker
-  confirm.
-- **MailWorker** is a real consumer: `startMailWorker()` returns `{ stop() }`.
-- **AuthSandbox** is a per-request factory `Auth(req)`.
-- **View** is the single Edge instance. **Log** writes to `<app>/storages/logs/averoa.log`.
-
-</details>
-
-## 🧩 Ecosystem
-
-| Package | What it does |
+| Method | Returns |
 | --- | --- |
-| [averoajs](https://github.com/budiherma1/averoajs) | the boilerplate: start here |
-| [@averoa/core](https://github.com/budiherma1/AveroaCore) | builds the Express 5 app and the `averoa` CLI |
-| **[@averoa/utilities](https://github.com/budiherma1/AveroaUtilities)** | this package |
-| [@averoa/routes](https://github.com/budiherma1/AveroaRoute) | Laravel-style router with `crud()` model hooks |
+| `user()` | `req.user`, else `req.session.passport.user`, else `{}` |
+| `check()` | `req.isAuthenticated()`, or `false` when passport is not set up |
+| `logout()` | Promise that resolves once `req.logOut()` has finished (passport >= 0.6 callback style) |
 
-## 🤝 Contributing
+## Path helpers
+
+```js
+import { appRoot, appPath, appHas, importApp, importAppDefault } from '@averoa/utilities/paths';
+
+appPath('config', 'database.js');                                   // absolute path inside the app
+appHas('app', 'Providers', 'index.js');                             // true / false
+const models = await importApp('app/Models/index.js');              // module namespace
+const config = await importAppDefault('config/mail.js', { optional: true }); // default export, or null when missing
+```
+
+`appRoot()` resolves, once per process, to:
+
+1. `AVEROA_ROOT`, resolved against the current directory when relative;
+2. otherwise the nearest directory, walking up from `process.cwd()`, that contains a `package.json` and is not inside
+   `node_modules`;
+3. otherwise `process.cwd()`.
+
+The result is cached; `resetAppRoot()` clears it (for tests that change `AVEROA_ROOT`). This replaces the
+`./../../../` imports of 1.x, so the package works with pnpm, npm workspaces, symlinks and monorepos. Set
+`AVEROA_ROOT` when the process does not start inside the project folder.
+
+| Function | Description |
+| --- | --- |
+| `appRoot()` | The application root directory. |
+| `appPath(...segments)` | `path.join(appRoot(), ...segments)`. |
+| `appHas(...segments)` | `true` when that app-relative file or directory exists. |
+| `importApp(relativePath, { optional })` | Dynamic `import()` of an app file. With `optional: true`, resolves to `null` when the file does not exist instead of rejecting. |
+| `importAppDefault(relativePath, options)` | Like `importApp`, resolving to the default export (or `null`). |
+| `resetAppRoot()` | Forgets the cached root. |
+
+`@averoa/utilities/paths` only depends on Node built-ins. It is the entry point to use from `config/*.js` files and
+from any module that the root package itself loads.
+
+## Configuration
+
+Environment variables read by this package. The `DB_*`, `MAIL_*` (except `MAIL_QUEUE`) and `FETCH_*` variables are
+only used when the matching `config/*.js` file does not exist or exports nothing.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AVEROA_ROOT` | nearest `package.json` at or above the cwd | Application root. |
+| `AVEROA_CONFIG_WAIT_MS` | `2000` | Maximum time to wait for `config/database.js` while the package is imported. |
+| `DB_CLIENT` | `mysql2` | knex client. |
+| `DB_HOST` | — | Database host (not used for SQLite). |
+| `DB_PORT` | — | Database port. |
+| `DB_USER` | — | Database user. |
+| `DB_PASS` | — | Database password. |
+| `DB_NAME` | — | Database name; the database file for `sqlite3`/`better-sqlite3` (default `:memory:`; a relative path is resolved against the app root, like `@averoa/core`'s knexfile). |
+| `MAIL_HOST` | — | SMTP host. |
+| `MAIL_PORT` | — | SMTP port. |
+| `MAIL_SECURE` | — | `true` for implicit TLS; any other value means `false`. Unset leaves nodemailer's default. |
+| `MAIL_USERNAME` | — | SMTP user; when unset, no auth is configured. |
+| `MAIL_PASSWORD` | — | SMTP password. |
+| `MAIL_QUEUE` | `mail` | Default mail queue, used when `config/mail.js` has no `queue`. |
+| `RABBITMQ_SERVER` | — | AMQP URL, used when `config/queue.js` has no `amqp`/`url`. Required for `Queue` and the mail worker. |
+| `FETCH_BASE_URL` | — | axios `baseURL`. |
+| `FETCH_TIMEOUT` | — | axios `timeout` in ms. |
+| `LOG_LEVEL` | `info` | winston level: `error`, `warn`, `info`, `http`, `verbose`, `debug`, `silly`. |
+| `NODE_ENV` | — | `production` turns on the Edge template cache and turns off the console log transport. |
+
+## Security notes
+
+- **Error messages.** `Crud` and `FilterSearch` never return database driver messages (they contain the SQL and
+  bound values, such as password hashes). Clients get `'Database error'` or `'Internal error'`, and the full error is
+  logged. Messages of `FilterSearchError`, `PublicError` (or any error with `expose === true`) and Objection
+  validation errors are returned as is.
+- **Mass assignment.** A raw `req.body` can only write `writableColumns()`. `req.dataReq` is trusted, so only set it
+  from validated data.
+- **Hidden columns** are excluded from JSON, `$select`, filters, `orderBy`, `groupBy`, relation filters and request
+  writes (unless `writable`).
+- **Queries.** Every filter value is a bound parameter, and every column name is checked against a whitelist before
+  it reaches the query.
+- **Result size.** `limit` is capped by `maxLimit` (default 1000), including `limit=0`.
+- **Soft-deleted data** is not readable or writable through `Crud`/`FilterSearch` unless the model opts into
+  `$withTrashed`.
+- **Relations** are limited to `static allowGraph`; deeper graphs, recursion and modifiers must be allowed
+  explicitly.
+
+## Testing
+
+```bash
+npm install
+npm test
+```
+
+The suite uses `node:test` and an in-memory `better-sqlite3` database with the fixture app in `test/fixtures/`. AMQP
+and SMTP are replaced by in-process fakes, so no MySQL, RabbitMQ or mail server is needed.
+
+## Upgrading
+
+The full list of changes is in [CHANGELOG.md](./CHANGELOG.md).
+
+**2.0.2** (patch release)
+
+- `Crud` and `FilterSearch` error results now include `statusCode` (`400`, `404`, `422` or `500`); send it with
+  `res.status(result.statusCode ?? 200)`. Tests that compare a whole error result with `deepEqual` need the new key.
+- `?$datatable=0` / `false` no longer switch on DataTables mode; only `1`, `true`, `yes`, `on`.
+- `Crud.findAll` resolves `{ status: false, ... }` for an unknown model name instead of rejecting.
+- `Crud.findOne` answers `{ status: false, message, statusCode: 404 }` for a missing or soft-deleted id (it was
+  `{ status: true, data: null }`); `update`/`delete` with no matching row answer the same (they were `{ status: false }`).
+- `Model.validation()` in create mode no longer requires the primary key or non-writable hidden columns.
+- Knex-mode soft delete is qualified with the base table; a `FROM` table without `deleted_at` whose joined table has
+  it now errors instead of filtering the joined table (set `softDelete: false` there).
+- `DB_CLIENT=sqlite3`/`better-sqlite3` without `config/database.js` now works (`DB_NAME` is the file; a relative path is resolved against the app root, so the app and the migrate/seed scripts open the same file).
+
+**2.0.1** (security release)
+
+- `nodemailer` upgraded from ^6.9 to ^10.3.1, which requires **Node.js >= 20**.
+- The optional `@faker-js/faker` peer now requires **>= 10.5.0**; seeders must use the faker 10 API
+  (`f.person.*`, `f.number.int`, ...).
+
+**From 1.x to 2.0**
+
+- ESM only. Peer dependencies `knex`, `objection` and `edge.js` are installed by the application.
+- App files are found through the app root (`AVEROA_ROOT` or the nearest `package.json`) instead of `./../../../`
+  imports. Models load from `app/Models/index.js` (no more `@averoa/models`). Config files fall back to env.
+- `validationRouter` responds **422** and `checkParamId` responds **404** (both were 200).
+- Soft delete is enforced for every model with `timestamp !== false`; `Crud.delete` hard-deletes models with
+  `timestamp: false`.
+- New `static hidden`, `static allowGraph` and `static allowWithTrashed`; `$select` and `$relations` are validated.
+- Filters are strict: unknown columns or operators and invalid values return `{ status: false, message }`.
+- `limit` is capped by `maxLimit`; `limit=0` means "all, up to `maxLimit`".
+- `:like` is parameterized; `:ilike` and `:search` use `ilike` on PostgreSQL. `$relations-type=join` paginates on root
+  rows.
+- `Crud` writes only known columns from a raw body. `moment` was removed.
+- `Queue` uses one lazy connection, durable queues and persistent messages, and resolves after the broker confirm.
+- The mail worker is a real consumer: `startMailWorker()` returns `{ stop() }`.
+- `AuthSandbox` is a per-request factory `Auth(req)`.
+- `View` is the single Edge instance; `Log` writes to `<app>/storages/logs/averoa.log`.
+- Config files must import helpers from `@averoa/utilities/paths`; `DB` is a proxy with `getDB()` / `DB.ready`.
+
+## Related packages
+
+| Package | Description | npm | Repository |
+| --- | --- | --- | --- |
+| `@averoa/core` | Builds the Express 5 app and provides the `averoa` CLI. | [npm](https://www.npmjs.com/package/@averoa/core) | [budiherma1/AveroaCore](https://github.com/budiherma1/AveroaCore) |
+| `@averoa/utilities` | This package. | [npm](https://www.npmjs.com/package/@averoa/utilities) | [budiherma1/AveroaUtilities](https://github.com/budiherma1/AveroaUtilities) |
+| `@averoa/routes` | Laravel-style router with `crud()` model hooks. | [npm](https://www.npmjs.com/package/@averoa/routes) | [budiherma1/AveroaRoute](https://github.com/budiherma1/AveroaRoute) |
+| `averoajs` | The application boilerplate; start new projects here. | not published | [budiherma1/averoajs](https://github.com/budiherma1/averoajs) |
+
+## Contributing
 
 Issues and pull requests are welcome at
 [github.com/budiherma1/AveroaUtilities](https://github.com/budiherma1/AveroaUtilities). Please run `npm test` before
-you open a pull request.
+opening a pull request.
 
 ## License
 

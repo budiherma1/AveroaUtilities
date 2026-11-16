@@ -242,11 +242,15 @@ class Model extends Objection {
     return res.status(404).send({ status: false, message: `ID ${id} doesn't exist` });
   }
 
-  /** Validate a plain object. Returns `{ status:true }` or `{ status:false, data:{ column, message } }`. */
+  /**
+   * Validate a plain object. Returns `{ status:true }` or `{ status:false, data:{ column, message } }`.
+   * Create mode requires the `writableColumns()` whose `required` is not false
+   * (so not the pk unless `fillable`, nor hidden columns unless `writable`).
+   */
   static validation(request = {}, type = 'create') {
     if (type === 'create') {
-      for (const col in this.column) {
-        if (this.column[col].flag?.required !== false && isEmpty(request[col])) {
+      for (const col of this.writableColumns()) {
+        if (this.column[col]?.flag?.required !== false && isEmpty(request[col])) {
           return { status: false, data: { column: col, message: 'required' } };
         }
       }

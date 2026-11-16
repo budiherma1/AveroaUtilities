@@ -1,5 +1,39 @@
 # Changelog
 
+## 2.0.2
+
+### Fixed
+
+- `?$datatable=0` (or `false`) no longer enables DataTables mode. Only `1`, `true`, `yes`, `on` (any case) or a
+  boolean `true` enable it; `$datatable` and `$draw` are never passed to the filters.
+- `Crud.findAll` resolves `{ status: false, message, statusCode }` for an unknown model name (it rejected), like the
+  other `Crud` methods.
+- `col:in` / `col:btwn` reject object values (`?id:in[a]=1` became `"[object Object]"`) and arrays that hold anything
+  but strings, with `invalid value for <key>` (400). `$select` objects are rejected as `invalid $select`.
+- `Model.validation()` in create mode only requires `writableColumns()`: the primary key (unless `flag.fillable`) and
+  hidden columns that are not `flag.writable` are no longer required, matching `validationRouter`.
+- Knex-mode soft delete qualifies `deleted_at` with the base table (`config.table`, or the builder's single `FROM`
+  table / alias), so builders that join other tables with `deleted_at` no longer fail as ambiguous. Raw or subquery
+  `FROM`s keep the unqualified name. New `table` option for `FilterSearch.knex`.
+- Without `config/database.js`, `DB_CLIENT=sqlite3` / `better-sqlite3` builds
+  `{ filename: DB_NAME || ':memory:' }` with `useNullAsDefault: true` (it built an unusable host/port connection).
+- `Crud.update` with uploads reads the current row with the transaction (`Model.query(trx)`), not outside it.
+- `option.update` on `Crud.update` / `Crud.delete` can no longer overwrite `created_by` / `created_at`
+  (`option.insert` on `create` still may set them).
+- A relative SQLite `DB_NAME` in the env fallback is resolved against the app root (not the process cwd), matching `@averoa/core`'s knexfile, so the app and the migrate/seed scripts always open the same file. New export `sqliteFilename()` from `DB.js`.
+
+### Changed
+
+- Error results from `Crud` and `FilterSearch` include `statusCode`: `FilterSearchError` 400, Objection
+  `ValidationError` 422, `NotFoundError` 404, `PublicError` / `expose` errors their own code, database and other
+  errors 500 (`FilterSearch.knex` without `column` too). Controllers can send
+  `res.status(result.statusCode ?? 200)`. The rest of the `{ status: false, message }` shape is unchanged; success
+  results have no `statusCode`.
+- `Crud.findOne` resolves `{ status: false, message: "ID <id> doesn't exist", statusCode: 404 }` for a missing or
+  soft-deleted id (it resolved `{ status: true, data: null }`), so callers outside the `crud()` route hooks get a 404
+  too. `Crud.update` / `Crud.delete` resolve the same result when no live row matched (they resolved a bare
+  `{ status: false }`).
+
 ## 2.0.1
 
 ### Security

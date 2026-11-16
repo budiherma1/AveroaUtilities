@@ -4,7 +4,7 @@ import {
   DB, Users, Posts, resetDb, fakeReq,
 } from './helpers.js';
 import knex from 'knex';
-import FilterSearch from '../FilterSearch.js';
+import FilterSearch, { baseTableRef } from '../FilterSearch.js';
 
 beforeEach(async () => {
   await resetDb();
@@ -143,7 +143,7 @@ test('$withTrashed only when allowWithTrashed', async () => {
 
 test('operator on unknown column and unknown operator return an error result (no crash)', async () => {
   const r = await search({ 'nope:eq': '1' });
-  assert.deepEqual(r, { status: false, message: "column nope doesn't exist" });
+  assert.deepEqual(r, { status: false, message: "column nope doesn't exist", statusCode: 400 });
   assert.equal((await search({ 'name:drop': 'x' })).status, false);
   assert.equal((await search({ 'name:eq': { $gt: '' } })).status, false);
 });
@@ -194,7 +194,7 @@ test('req.query is not mutated', async () => {
 
 test('U3: knex/driver errors return a generic message without SQL or values', async () => {
   const r = await FilterSearch.knex(DB('no_such_table'), fakeReq({ query: { 'name:eq': 'S3cretHash' } }), { column: ['name'] });
-  assert.deepEqual(r, { status: false, message: 'Database error' });
+  assert.deepEqual(r, { status: false, message: 'Database error', statusCode: 500 });
   const m = await FilterSearch.model(Users, fakeReq({ query: { 'name:eq': 'x' } }), {});
   assert.equal(m.status, true);
 });
@@ -217,7 +217,7 @@ test('U4: $relations-type=join left-joins and ignores soft-deleted related rows'
 
   // keys that look like Object.prototype members are not relations
   const proto = await search({ ...join, 'constructor.name:eq': 'x' });
-  assert.deepEqual(proto, { status: false, message: "column constructor.name doesn't exist" });
+  assert.deepEqual(proto, { status: false, message: "column constructor.name doesn't exist", statusCode: 400 });
 });
 
 test('U7: knex mode counts on a copy without the builder\'s select/orderBy', async () => {
@@ -280,4 +280,54 @@ test('U9: knex mode ignores unknown keys and `_` too', async () => {
   const r = await FilterSearch.knex(DB('users'), fakeReq({ query: { _: '1', utm_source: 'x', name: 'bob' } }), { column: ['id', 'name'] });
   assert.equal(r.status, true, r.message);
   assert.deepEqual(r.data.map((u) => u.name), ['bob']);
+});
+
+test('U-c: :in / :btwn reject object values and arrays of non-strings', async () => {
+  for (const [key, value] of [
+    ['id:in', { a: '1' }],
+    ['id:in', ['1', { a: '2' }]],
+    ['id:btwn', { from: '1', to: '2' }],
+    ['id:btwn', [['1'], '2']],
+  ]) {
+    assert.deepEqual(await search({ [key]: value }), { status: false, message: `invalid value for ${key}`, statusCode: 400 }, key);
+  }
+  // repeated keys (arrays of strings) still work
+  assert.deepEqual((await search({ 'id:in': ['1', '2'] })).data.map((u) => u.name), ['alice', 'bob']);
+  assert.deepEqual((await search({ 'id:btwn': ['2', '3'] })).data.map((u) => u.name), ['bob']);
+  assert.equal((await search({ $select: { a: 'id' } })).message, 'invalid $select');
+});
+
+test('U-e: knex mode qualifies deleted_at with the base table (alias, name or config.table)', async () => {
+  assert.equal(baseTableRef(DB('users')), 'users');
+  assert.equal(baseTableRef(DB('users as u')), 'u');
+  assert.equal(baseTableRef(DB({ u: 'users' })), 'u');
+  assert.equal(baseTableRef(DB.from(DB.raw('users u'))), null);
+  assert.equal(baseTableRef(DB.from((q) => q.from('users').as('x'))), null);
+  assert.equal(baseTableRef(DB.select(1)), null);
+
+  // both tables have deleted_at: an unqualified filter would be ambiguous
+  const joined = () => DB('users as u').join('posts as p', 'p.user_id', 'u.id').select('u.id', 'u.name', 'p.title');
+  const cfg = { column: ['u.id', 'u.name', 'p.title'], timestamp: true };
+  const seen = [];
+  const listen = (q) => seen.push(q.sql);
+  DB.on('query', listen);
+  let r;
+  try {
+    r = await FilterSearch.knex(joined(), fakeReq({ query: { orderBy: 'p.title' } }), cfg);
+  } finally {
+    DB.removeListener('query', listen);
+  }
+  assert.equal(r.status, true, r.message);
+  assert.deepEqual(r.data.map((x) => x.title), ['first', 'gone', 'second']);
+  assert.ok(seen.every((sql) => sql.includes('`u`.`deleted_at` is null')), seen.join('\n'));
+
+  // config.table wins over the derived name
+  await DB('users').where('id', 2).update({ deleted_at: new Date() });
+  const explicit = await FilterSearch.knex(joined(), fakeReq({ query: {} }), { ...cfg, table: 'u' });
+  assert.deepEqual(explicit.data.map((x) => x.title).sort(), ['first', 'second']);
+
+  // not derivable → unqualified, as before
+  const raw = await FilterSearch.knex(DB.from(DB.raw('users')), fakeReq({ query: {} }), { column: ['id', 'name'], timestamp: true });
+  assert.equal(raw.status, true, raw.message);
+  assert.equal(raw.data.length, 1);
 });

@@ -186,3 +186,26 @@ test('U18: hidden columns are dropped by validationRouter unless flag.writable',
   // still never serialized
   assert.equal('password' in WritablePw.fromJson({ password: 'x' }).toJSON(), false);
 });
+
+test('U-d: validation() create mode skips the pk (unless fillable) and non-writable hidden columns', () => {
+  class Strict extends Users {
+    static column = {
+      ...Users.column,
+      id: { flag: {} }, // required not false
+      password: { flag: {} }, // hidden, not writable
+    };
+  }
+  assert.deepEqual(Strict.validation({ name: 'a', email: 'a@x.io' }), { status: true });
+
+  class FillableId extends Strict {
+    static column = { ...Strict.column, id: { flag: { fillable: true } } };
+  }
+  assert.deepEqual(FillableId.validation({ name: 'a', email: 'a@x.io' }), { status: false, data: { column: 'id', message: 'required' } });
+
+  class WritablePw extends Strict {
+    static column = { ...Strict.column, password: { flag: { writable: true } } };
+  }
+  assert.deepEqual(WritablePw.validation({ name: 'a', email: 'a@x.io' }), { status: false, data: { column: 'password', message: 'required' } });
+
+  assert.deepEqual(Strict.validation({ email: 'a@x.io' }), { status: false, data: { column: 'name', message: 'required' } });
+});

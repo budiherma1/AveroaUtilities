@@ -11,7 +11,7 @@ const COMPARE = {
   eq: '=', neq: '!=', lt: '<', lte: '<=', gt: '>', gte: '>=',
 };
 
-/** Thrown for invalid client filters; FilterSearch.model/knex turn it into `{ status:false, message }`. */
+/** Thrown for invalid client filters; FilterSearch.model/knex turn it into `{ status:false, message, statusCode: 400 }`. */
 export class FilterSearchError extends Error {
   constructor(message, statusCode = 400) {
     super(message);
@@ -32,6 +32,14 @@ export class PublicError extends Error {
 
 const SAFE_ERROR_NAMES = new Set(['FilterSearchError', 'PublicError', 'ValidationError', 'NotFoundError']);
 
+/** HTTP status for an error whose message is shown to the client. */
+function exposedStatus(e) {
+  if (e.name === 'ValidationError') return 422;
+  if (e.name === 'NotFoundError') return 404;
+  const code = e.statusCode ?? e.status;
+  return Number.isInteger(code) && code >= 400 && code <= 599 ? code : 400;
+}
+
 /** True for driver / knex / objection DB errors (their messages contain SQL and bound values). */
 function isDatabaseError(e) {
   return Boolean(e && typeof e === 'object' && (
@@ -41,18 +49,21 @@ function isDatabaseError(e) {
 }
 
 /**
- * Turn an error caught by FilterSearch/Crud into a client-safe result.
+ * Turn an error caught by FilterSearch/Crud into a client-safe result
+ * `{ status:false, message, statusCode }`.
  * Filter/validation errors keep their message; database errors (whose
  * messages contain the interpolated SQL, including values such as password
  * hashes) and other unexpected errors get a generic message and are logged.
+ * `statusCode`: FilterSearchError 400, Objection ValidationError 422,
+ * NotFoundError 404, PublicError / `expose` errors their own code, anything else 500.
  */
 export function errorResult(e, where = 'query') {
   if (e && (SAFE_ERROR_NAMES.has(e.name) || e.expose === true)) {
-    return { status: false, message: e.message };
+    return { status: false, message: e.message, statusCode: exposedStatus(e) };
   }
   const db = isDatabaseError(e);
   Log.error(`${where} failed: ${e?.stack ?? e}`);
-  return { status: false, message: db ? 'Database error' : 'Internal error' };
+  return { status: false, message: db ? 'Database error' : 'Internal error', statusCode: 500 };
 }
 
 const isTruthyFlag = (v) => ['1', 'true', 'yes'].includes(String(v).toLowerCase());
@@ -79,13 +90,20 @@ export function allowedColumns(model) {
   return [...new Set(columns)].filter((c) => !hidden.has(c));
 }
 
-function splitList(value, label) {
-  const list = Array.isArray(value) ? value : String(value).split(',');
-  const out = list.map((v) => {
-    if (typeof v !== 'string') throw new FilterSearchError(`invalid ${label}`);
+/**
+ * A comma-separated string (numbers/booleans are stringified) or an array of
+ * strings (repeated query key). Objects (`?id:in[a]=1`) and arrays holding
+ * anything but strings throw FilterSearchError(`invalidMessage`).
+ */
+function splitList(value, invalidMessage) {
+  let list;
+  if (Array.isArray(value)) list = value;
+  else if (['string', 'number', 'boolean'].includes(typeof value)) list = String(value).split(',');
+  else throw new FilterSearchError(invalidMessage);
+  return list.map((v) => {
+    if (typeof v !== 'string') throw new FilterSearchError(invalidMessage);
     return v.trim();
   }).filter(Boolean);
-  return out;
 }
 
 /**
@@ -94,7 +112,7 @@ function splitList(value, label) {
  */
 export function parseSelect(value, allowed) {
   const set = new Set(allowed);
-  const columns = splitList(value, '$select');
+  const columns = splitList(value, 'invalid $select');
   if (!columns.length) throw new FilterSearchError('$select is empty');
   for (const column of columns) {
     if (!set.has(column)) throw new FilterSearchError(`column ${column} is not selectable`);
@@ -221,6 +239,29 @@ export function applySoftDelete(builder, model) {
   return builder;
 }
 
+/**
+ * Name (or alias) of a knex builder's single FROM table, for qualifying
+ * `deleted_at`: `'users'` → users, `'users as u'` → u, `{ u: 'users' }` → u.
+ * null for anything else (raw, subquery, no table) — the column then stays unqualified.
+ */
+export function baseTableRef(builder) {
+  let from;
+  try {
+    from = builder?._single?.table;
+  } catch {
+    return null;
+  }
+  if (typeof from === 'string') {
+    const m = /^\s*([\w$.]+)(?:\s+as\s+([\w$]+))?\s*$/i.exec(from);
+    return m ? (m[2] ?? m[1]) : null;
+  }
+  if (from && typeof from === 'object' && Object.getPrototypeOf(from) === Object.prototype) {
+    const keys = Object.keys(from);
+    if (keys.length === 1 && typeof from[keys[0]] === 'string' && /^[\w$]+$/.test(keys[0])) return keys[0];
+  }
+  return null;
+}
+
 /* ------------------------------------------------------------------------ */
 /* FilterSearch                                                              */
 /* ------------------------------------------------------------------------ */
@@ -228,7 +269,7 @@ export function applySoftDelete(builder, model) {
 class FilterSearch {
   /**
    * Filter/paginate an Objection model from `req.query`.
-   * Resolves `{ status:true, metadata, data }` or `{ status:false, message }`.
+   * Resolves `{ status:true, metadata, data }` or `{ status:false, message, statusCode }`.
    */
   static async model(model, req, config = {}) {
     try {
@@ -244,7 +285,7 @@ class FilterSearch {
    */
   static async knex(builder, req, config = {}) {
     if (!Array.isArray(config.column)) {
-      return { status: false, message: 'need to define column array' };
+      return { status: false, message: 'need to define column array', statusCode: 500 };
     }
     try {
       return await new this().init('knex', builder, req, config);
@@ -271,6 +312,8 @@ class FilterSearch {
       this.tableName = null;
       this.dialect = dialectOf(table.client?.config?.client ?? table.client?.dialect);
       this.softDelete = Boolean(config.timestamp) && config.softDelete !== false;
+      const base = typeof config.table === 'string' && config.table.trim() ? config.table.trim() : baseTableRef(table);
+      this.deletedAtColumn = base ? `${base}.deleted_at` : 'deleted_at';
       const hidden = new Set(config.hidden ?? []);
       this.allowed = [...new Set([...config.column, ...(config.timestamp ? TIMESTAMP_COLUMNS : [])])]
         .filter((c) => !hidden.has(c));
@@ -292,7 +335,7 @@ class FilterSearch {
     const base = () => {
       const builder = type === 'model' ? table.query() : table.clone();
       if (this.softDelete && !this.withTrashed) {
-        builder.whereNull(this.qualify('deleted_at'));
+        builder.whereNull(type === 'model' ? this.qualify('deleted_at') : this.deletedAtColumn);
       }
       for (const apply of filters) apply(builder);
       return builder;
@@ -460,7 +503,7 @@ class FilterSearch {
         return (b, col, or) => b[or ? 'orWhere' : 'where'](col, ilikeOp, v);
       }
       case 'in': {
-        const list = splitList(value, key);
+        const list = splitList(value, `invalid value for ${key}`);
         return (b, col, or) => b[or ? 'orWhereIn' : 'whereIn'](col, list);
       }
       case 'notNull':
@@ -468,7 +511,7 @@ class FilterSearch {
       case 'isNull':
         return (b, col, or) => b[or ? 'orWhereNull' : 'whereNull'](col);
       case 'btwn': {
-        const range = splitList(value, key);
+        const range = splitList(value, `invalid value for ${key}`);
         if (range.length !== 2) throw new FilterSearchError(`${key} needs two comma separated values`);
         return (b, col, or) => b[or ? 'orWhereBetween' : 'whereBetween'](col, range);
       }

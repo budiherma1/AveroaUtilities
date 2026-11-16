@@ -48,6 +48,25 @@ function payloadFrom(model, req) {
   return out;
 }
 
+/** `$datatable` switch: only '1', 'true', 'yes', 'on' (any case) or boolean true enable it. */
+function isEnabled(value) {
+  if (value === true) return true;
+  return typeof value === 'string' && ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
+/** `option.update` without the creation audit columns (they are never changed after insert). */
+function withoutCreated(values) {
+  const out = { ...(values ?? {}) };
+  delete out.created_by;
+  delete out.created_at;
+  return out;
+}
+
+/** Result for an id with no live row (missing or soft-deleted). */
+function notFound(id) {
+  return { status: false, message: `ID ${id} doesn't exist`, statusCode: 404 };
+}
+
 class Crud {
   static async create(model, req, option = {}, trx = null) {
     try {
@@ -74,32 +93,34 @@ class Crud {
   }
 
   static async findAll(model, req, option = {}) {
-    const Model = await resolveModel(model);
-    const query = { ...(req.query ?? {}) };
-    const isDatatable = Boolean(query.$datatable);
-    const datatableDraw = query.$draw;
-    delete query._; // jQuery cache buster, never a filter
-    if (isDatatable) {
+    try {
+      const Model = await resolveModel(model);
+      const query = { ...(req.query ?? {}) };
+      const isDatatable = isEnabled(query.$datatable);
+      const datatableDraw = query.$draw;
+      delete query._; // jQuery cache buster, never a filter
       delete query.$draw;
       delete query.$datatable;
+
+      // req-like object whose `query` is our copy (req.query is never mutated)
+      const request = Object.create(req, { query: { value: query, enumerable: true } });
+      const data = typeof Model.filterSearch === 'function'
+        ? await Model.filterSearch(request, option)
+        : await FilterSearch.model(Model, request, option);
+
+      if (isDatatable && data.status) {
+        return {
+          draw: datatableDraw,
+          recordsTotal: data.metadata?.item_total ?? 0,
+          recordsFiltered: data.metadata?.item_total ?? 0,
+          data: data.data,
+        };
+      }
+
+      return data;
+    } catch (e) {
+      return errorResult(e, 'Crud.findAll');
     }
-
-    // req-like object whose `query` is our copy (req.query is never mutated)
-    const request = Object.create(req, { query: { value: query, enumerable: true } });
-    const data = typeof Model.filterSearch === 'function'
-      ? await Model.filterSearch(request, option)
-      : await FilterSearch.model(Model, request, option);
-
-    if (isDatatable && data.status) {
-      return {
-        draw: datatableDraw,
-        recordsTotal: data.metadata?.item_total ?? 0,
-        recordsFiltered: data.metadata?.item_total ?? 0,
-        data: data.data,
-      };
-    }
-
-    return data;
   }
 
   static async findOne(model, req, option = {}) {
@@ -118,7 +139,8 @@ class Crud {
       }
 
       const result = await query;
-      return { status: true, data: result ?? null };
+      if (!result) return notFound(req.params.id);
+      return { status: true, data: result };
     } catch (e) {
       return errorResult(e, 'Crud.findOne');
     }
@@ -133,7 +155,7 @@ class Crud {
 
       if (req.dataFiles !== undefined) {
         const uploader = await uploadProvider();
-        const old = await Model.query().findById(req.params.id);
+        const old = await Model.query(trx).findById(req.params.id);
         for (const key in req.dataFiles) {
           data[key] = await uploader.upload(req.dataFiles[key], req.routeData, old?.[key]);
         }
@@ -146,8 +168,8 @@ class Crud {
 
       const query = Model.query(trx).findById(req.params.id);
       applySoftDelete(query, Model);
-      const affected = await query.patch({ ...data, ...(option.update ?? {}) });
-      return { status: !!affected };
+      const affected = await query.patch({ ...data, ...withoutCreated(option.update) });
+      return affected ? { status: true } : notFound(req.params.id);
     } catch (e) {
       return errorResult(e, 'Crud.update');
     }
@@ -164,12 +186,12 @@ class Crud {
         affected = await query.patch({
           deleted_at: new Date(),
           deleted_by: req.user?.id ?? null,
-          ...(option.update ?? {}),
+          ...withoutCreated(option.update),
         });
       } else {
         affected = await query.delete();
       }
-      return { status: !!affected };
+      return affected ? { status: true } : notFound(req.params.id);
     } catch (e) {
       return errorResult(e, 'Crud.delete');
     }

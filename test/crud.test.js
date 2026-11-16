@@ -70,8 +70,9 @@ test('update keeps created_by and sets updated_by', async () => {
 });
 
 test('update/delete do not touch soft-deleted rows', async () => {
-  assert.deepEqual(await Crud.update('Users', fakeReq({ params: { id: '2' }, body: { name: 'x' } })), { status: false });
-  assert.deepEqual(await Crud.delete('Users', fakeReq({ params: { id: '2' } })), { status: false });
+  const gone = { status: false, message: "ID 2 doesn't exist", statusCode: 404 };
+  assert.deepEqual(await Crud.update('Users', fakeReq({ params: { id: '2' }, body: { name: 'x' } })), gone);
+  assert.deepEqual(await Crud.delete('Users', fakeReq({ params: { id: '2' } })), gone);
 });
 
 test('delete stores the real (24h) time for afternoon deletes and sets deleted_by', async () => {
@@ -88,7 +89,7 @@ test('delete stores the real (24h) time for afternoon deletes and sets deleted_b
   assert.equal(stored.getHours(), 15);
   assert.equal(stored.getTime(), afternoon.getTime());
   assert.equal(row.deleted_by, 4);
-  assert.equal((await Crud.findOne('Users', fakeReq({ params: { id: '1' } }))).data, null);
+  assert.equal((await Crud.findOne('Users', fakeReq({ params: { id: '1' } }))).statusCode, 404);
 });
 
 test('delete is a hard delete for timestamp:false models', async () => {
@@ -105,7 +106,7 @@ test('findOne respects soft delete, hidden, $select and $relations rules', async
   assert.equal('password' in json, false);
   assert.deepEqual(json.posts.map((p) => p.title), ['hello']);
 
-  assert.equal((await Crud.findOne('Users', fakeReq({ params: { id: '2' } }))).data, null);
+  assert.equal((await Crud.findOne('Users', fakeReq({ params: { id: '2' } }))).statusCode, 404);
   assert.equal((await Crud.findOne('Users', fakeReq({ params: { id: '1' }, query: { $select: 'password' } }))).status, false);
   assert.equal((await Crud.findOne('Users', fakeReq({ params: { id: '1' }, query: { $relations: 'secrets' } }))).status, false);
   const sel = await Crud.findOne('Users', fakeReq({ params: { id: '1' }, query: { $select: 'id,name' } }));
@@ -133,10 +134,10 @@ test('U3: database errors are not leaked to the client (generic message, logged)
   const r = await Crud.create('Users', fakeReq({ body: { name: 'x', email: 'e@x.io' } }), {
     insert: { password: 'S3cretHash', nonexistent: 1 },
   });
-  assert.deepEqual(r, { status: false, message: 'Database error' });
+  assert.deepEqual(r, { status: false, message: 'Database error', statusCode: 500 });
 
   const u = await Crud.update('Users', fakeReq({ params: { id: '1' }, dataReq: { nope: 'S3cretHash' } }));
-  assert.deepEqual(u, { status: false, message: 'Database error' });
+  assert.deepEqual(u, { status: false, message: 'Database error', statusCode: 500 });
 
   // filter errors keep their message
   const f = await Crud.findOne('Users', fakeReq({ params: { id: '1' }, query: { $select: 'password' } }));
@@ -183,4 +184,113 @@ test('U18: Crud raw body writes a hidden column only when flagged writable', asy
 
   await Crud.create('Users', fakeReq({ body: { name: 'n', email: 'n@x.io', password: 'pw' } }));
   assert.equal((await DB('users').where('email', 'n@x.io').first()).password, null);
+});
+
+test('U-a: $datatable is enabled only by 1/true/yes/on (any case) or boolean true', async () => {
+  for (const value of ['1', 'true', 'TRUE', 'yes', 'On', true]) {
+    const dt = await Crud.findAll('Users', fakeReq({ query: { $datatable: value, $draw: '2' } }));
+    assert.deepEqual(Object.keys(dt), ['draw', 'recordsTotal', 'recordsFiltered', 'data'], String(value));
+  }
+  for (const value of ['0', 'false', 'off', 'no', '', 'x', false, ['1']]) {
+    const plain = await Crud.findAll('Users', fakeReq({ query: { $datatable: value, $draw: '2' } }));
+    assert.equal(plain.status, true, `${value}: ${plain.message}`);
+    assert.ok('metadata' in plain, String(value));
+    assert.equal(plain.data.length, 1);
+  }
+});
+
+test('U-b: findAll resolves an error result for an unknown model name', async () => {
+  const r = await Crud.findAll('Nope', fakeReq({ query: {} }));
+  assert.deepEqual(r, { status: false, message: 'Model Nope not found in app/Models/index.js', statusCode: 500 });
+});
+
+test('U-g: update with uploads reads the old row inside the transaction', async () => {
+  class WithAvatar extends Users {}
+  await DB.schema.alterTable('users', (t) => t.string('avatar'));
+  const req = fakeReq({
+    params: { id: '1' },
+    dataReq: { name: 'alice' },
+    dataFiles: { avatar: { originalname: 'new.png' } },
+    routeData: 'users',
+  });
+  const seen = [];
+  const original = WithAvatar.query;
+  WithAvatar.query = function query(t) { seen.push(t); return original.call(this, t); };
+  try {
+    await DB.transaction(async (trx) => {
+      await DB('users').transacting(trx).where('id', 1).update({ avatar: 'users/in-trx.png' });
+      const r = await Crud.update(WithAvatar, req, {}, trx);
+      assert.deepEqual(r, { status: true });
+      // the uncommitted value is only visible inside the transaction
+      assert.equal(UploadProvider.calls.at(-1).oldFile, 'users/in-trx.png');
+    });
+  } finally {
+    WithAvatar.query = original;
+  }
+  assert.ok(seen.length >= 2);
+  assert.ok(seen.every((t) => t !== undefined && t !== null), 'every query got the transaction');
+  assert.equal((await DB('users').where('id', 1).first()).avatar, 'users/new.png');
+});
+
+test('U-h: option.update cannot overwrite created_by / created_at (option.insert still can)', async () => {
+  const before = await DB('users').where('id', 1).first();
+  const r = await Crud.update('Users', fakeReq({ params: { id: '1' }, body: { name: 'a2' } }), {
+    update: { created_by: 99, created_at: '2000-01-01 00:00:00', name: 'forced' },
+  });
+  assert.deepEqual(r, { status: true });
+  const row = await DB('users').where('id', 1).first();
+  assert.equal(row.created_by, 7);
+  assert.equal(row.created_at, before.created_at);
+  assert.equal(row.name, 'forced');
+
+  await Crud.delete('Users', fakeReq({ params: { id: '1' } }), { update: { created_by: 99 } });
+  const deleted = await DB('users').where('id', 1).first();
+  assert.equal(deleted.created_by, 7);
+  assert.notEqual(deleted.deleted_at, null);
+
+  const c = await Crud.create('Users', fakeReq({ body: { name: 'c', email: 'c@x.io' } }), { insert: { created_by: 42 } });
+  assert.equal(c.status, true, c.message);
+  assert.equal((await DB('users').where('email', 'c@x.io').first()).created_by, 42);
+});
+
+test('U-i: error results carry statusCode (400 filter, 404 not found, 422 validation, 500 generic)', async () => {
+  const filter = await Crud.findAll('Users', fakeReq({ query: { 'password:eq': 'x' } }));
+  assert.deepEqual(filter, { status: false, message: "column password doesn't exist", statusCode: 400 });
+
+  const select = await Crud.findOne('Users', fakeReq({ params: { id: '1' }, query: { $select: 'password' } }));
+  assert.equal(select.statusCode, 400);
+
+  class Throwing extends Users {
+    static filterSearch() { throw Throwing.next; }
+  }
+  const cases = [
+    [Users.createValidationError({ type: 'ModelValidation', message: 'name: bad' }), 422, 'name: bad'],
+    [Users.createNotFoundError(null, { message: 'gone' }), 404, 'gone'],
+    [Object.assign(new Error('teapot'), { expose: true, statusCode: 418 }), 418, 'teapot'],
+    [new Error('boom'), 500, 'Internal error'],
+  ];
+  for (const [error, statusCode, message] of cases) {
+    Throwing.next = error;
+    assert.deepEqual(await Crud.findAll(Throwing, fakeReq({ query: {} })), { status: false, message, statusCode });
+  }
+
+  // success results keep their shape
+  assert.equal('statusCode' in await Crud.findAll('Users', fakeReq({ query: {} })), false);
+  assert.deepEqual(await Crud.update('Users', fakeReq({ params: { id: '1' }, body: { name: 'x' } })), { status: true });
+});
+
+test('U-j: findOne / update / delete answer 404 for a missing or soft-deleted id', async () => {
+  for (const id of ['2', '999']) {
+    const gone = { status: false, message: `ID ${id} doesn't exist`, statusCode: 404 };
+    assert.deepEqual(await Crud.findOne('Users', fakeReq({ params: { id } })), gone, `findOne ${id}`);
+    assert.deepEqual(await Crud.update('Users', fakeReq({ params: { id }, body: { name: 'x' } })), gone, `update ${id}`);
+    assert.deepEqual(await Crud.delete('Users', fakeReq({ params: { id } })), gone, `delete ${id}`);
+  }
+  // hard delete (timestamp: false) too
+  assert.deepEqual(await Crud.delete('Tags', fakeReq({ params: { id: '5' } })), { status: false, message: "ID 5 doesn't exist", statusCode: 404 });
+
+  const found = await Crud.findOne('Users', fakeReq({ params: { id: '1' } }));
+  assert.equal(found.status, true);
+  assert.equal(found.data.name, 'alice');
+  assert.equal('statusCode' in found, false);
 });

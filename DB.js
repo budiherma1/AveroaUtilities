@@ -1,13 +1,41 @@
 import fs from 'fs';
+import path from 'path';
 import { createRequire } from 'module';
 import knex from 'knex';
 import { loadAppConfig } from './config.js';
 import { appHas, appPath } from './paths.js';
 
-/** Env-based configuration used when the app has no config/database.js. */
+const SQLITE_CLIENTS = new Set(['sqlite3', 'better-sqlite3']);
+
+/**
+ * Resolve a SQLite filename the same way @averoa/core's knexfile does: relative
+ * paths are relative to the app root (not the process cwd), so the app and the
+ * migrate/seed scripts always open the same file. ':memory:', absolute paths
+ * and `file:` URIs are kept as they are.
+ */
+export function sqliteFilename(name) {
+  if (!name || name === ':memory:' || name.startsWith('file:') || path.isAbsolute(name)) {
+    return name || ':memory:';
+  }
+  return appPath(name);
+}
+
+/**
+ * Env-based configuration used when the app has no config/database.js.
+ * SQLite clients get `{ filename: DB_NAME || ':memory:' }` (relative names resolved
+ * against the app root) and `useNullAsDefault`.
+ */
 export function envDatabaseConfig() {
+  const client = process.env.DB_CLIENT || 'mysql2';
+  if (SQLITE_CLIENTS.has(client)) {
+    return {
+      client,
+      connection: { filename: sqliteFilename(process.env.DB_NAME) },
+      useNullAsDefault: true,
+    };
+  }
   return {
-    client: process.env.DB_CLIENT || 'mysql2',
+    client,
     connection: {
       host: process.env.DB_HOST,
       port: process.env.DB_PORT ? Number(process.env.DB_PORT) : undefined,
