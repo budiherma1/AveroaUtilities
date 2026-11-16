@@ -8,7 +8,7 @@
 <p align="center">
   <a href="https://www.npmjs.com/package/@averoa/utilities"><img src="https://img.shields.io/npm/v/@averoa/utilities?color=cb3837&logo=npm" alt="npm version"></a>
   <a href="#license"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D18.17-339933?logo=node.js&logoColor=white" alt="Node.js >= 18.17">
+  <img src="https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white" alt="Node.js >= 20">
   <img src="https://img.shields.io/badge/express-5-000000?logo=express&logoColor=white" alt="Express 5">
   <img src="https://img.shields.io/badge/module-ESM-f7df1e" alt="ESM only">
 </p>
@@ -34,7 +34,7 @@ npm i -D @faker-js/faker   # only for seeders
 ```
 
 `knex` ^3, `objection` ^3 and `edge.js` ^5 are peer dependencies. `@faker-js/faker` is an optional peer, needed only
-for seeders. ESM only, Node >= 18.17.
+for seeders. ESM only, Node >= 20.
 
 ```js
 import {
@@ -233,7 +233,7 @@ await auth.logout();
 
 ## 🆙 Upgrading from 1.x
 
-2.0.0 requires Node >= 18.17 and is ESM only. The full list of breaking changes is in
+2.x requires Node >= 20 (2.0.0 allowed 18.17) and is ESM only. The full list of breaking changes is in
 [CHANGELOG.md](./CHANGELOG.md).
 
 <details>

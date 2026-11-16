@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.1
+
+### Security
+
+- Upgrade `nodemailer` from ^6.9 to ^10.3.1. Every 6.x release is affected by published advisories (SMTP command injection, recipient-domain allow-list bypasses, address-parser DoS, file/URL access bypasses).
+- Optional peer `@faker-js/faker` now requires >=10.5.0 (versions <=10.4.0 have a code-execution advisory in `helpers.fake`). Seeds must use the faker 10 API (`f.person.*`, `f.number.int`, ...).
+
+### Changed
+
+- `engines.node` is now >=20 (required by nodemailer 10). Node 18 is end-of-life.
+
 ## 2.0.0
 
 Requires Node >= 18.17, ESM only. Peer dependencies: `knex ^3`, `objection ^3`, `edge.js ^5`

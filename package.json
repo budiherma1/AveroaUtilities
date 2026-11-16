@@ -1,6 +1,6 @@
 {
   "name": "@averoa/utilities",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Model, CRUD, filtering, DB, mail, queue, view and logging utilities for AveroaJS",
   "main": "index.js",
   "type": "module",
@@ -29,17 +29,17 @@
   },
   "homepage": "https://github.com/budiherma1/AveroaUtilities#readme",
   "engines": {
-    "node": ">=18.17"
+    "node": ">=20"
   },
   "dependencies": {
     "amqplib": "^0.10.4",
     "axios": "^1.7.0",
-    "nodemailer": "^6.9.0",
+    "nodemailer": "^10.3.1",
     "validator": "^13.12.0",
     "winston": "^3.13.0"
   },
   "peerDependencies": {
-    "@faker-js/faker": ">=7",
+    "@faker-js/faker": ">=10.5.0",
     "edge.js": "^5.0.0",
     "knex": "^3.0.0",
     "objection": "^3.0.0"
@@ -50,7 +50,7 @@
     }
   },
   "devDependencies": {
-    "@faker-js/faker": "^8.4.1",
+    "@faker-js/faker": "^10.5.0",
     "better-sqlite3": "^11.10.0",
     "edge.js": "^5.5.1",
     "knex": "^3.1.0",
