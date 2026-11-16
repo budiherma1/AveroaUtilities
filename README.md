@@ -1561,7 +1561,8 @@ npm run test:integration
 Node.js 24), and `npm run test:integration` against MySQL
 8.0 / 8.4 and PostgreSQL 16 / 17 service containers (with `TZ=Asia/Jakarta`, so the Node.js and server time zones
 differ). `.github/workflows/release.yml` publishes to npm when a `vX.Y.Z` tag matching `package.json` is pushed,
-after the same checks; it needs an `NPM_TOKEN` repository secret.
+after the same checks and only for commits on `main`. It uses npm trusted publishing (no token
+secret) and publishes with a provenance statement.
 
 
 `test/jobs.integration.test.js` runs the jobs, delays, retries, failed queue and scheduler against a real RabbitMQ.

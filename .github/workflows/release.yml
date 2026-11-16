@@ -1,8 +1,12 @@
 name: Release
 
 # Publishes to npm when a version tag vX.Y.Z (matching package.json) is pushed.
-# Never runs on branch pushes or pull requests. Needs the repository secret
-# NPM_TOKEN (an npm granular access token with publish rights on this package).
+# Never runs on branch pushes or pull requests.
+#
+# Authentication is npm trusted publishing (OIDC): no NPM_TOKEN secret. The package's
+# settings on npmjs.com name this repository and this workflow file (release.yml) as
+# its trusted publisher; npm then accepts a short-lived token from this job only, and
+# adds a provenance statement (the commit and workflow that built the package).
 on:
   push:
     tags: ['v*.*.*']
@@ -50,7 +54,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      id-token: write # npm provenance statement
+      id-token: write # the OIDC token for npm trusted publishing (and provenance)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,9 +63,14 @@ jobs:
         with:
           node-version: 24.x
           registry-url: https://registry.npmjs.org
+      - name: npm supports trusted publishing
+        run: |
+          npm_version="$(npm --version)"
+          if ! node -e "const [a, b, c] = process.argv[1].split('.').map(Number); process.exit(a > 11 || (a === 11 && (b > 5 || (b === 5 && c >= 1))) ? 0 : 1)" "$npm_version"; then
+            echo "::error::npm $npm_version cannot use trusted publishing (needs 11.5.1 or later)"
+            exit 1
+          fi
       - name: Publish
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         # a prerelease version (1.2.3-beta.1) goes to the "next" dist-tag, not "latest"
         run: |
           version="$(node -p "require('./package.json').version")"
