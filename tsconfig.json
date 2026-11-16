@@ -1,0 +1,16 @@
+{
+  // Type-checks the hand-written declarations (*.d.ts) and the usage tests in
+  // test/types. Nothing is emitted: the package is plain JavaScript.
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": false,
+    "types": ["node"],
+    "noUnusedLocals": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["*.d.ts", "test/types/**/*.ts"]
+}
