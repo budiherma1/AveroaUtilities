@@ -12,3 +12,6 @@ export { default as View } from './View.js';
 export {
   appRoot, appPath, appHas, importApp, importAppDefault, resetAppRoot,
 } from './paths.js';
+export {
+  default as validate, describeValidation, isStandardSchema, VALIDATE,
+} from './Validate.js';

@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`validate(schemas, options?)`**: Express middleware that validates `body`, `query`, `params` and `headers` of
+  routes that are not crud routes. Each section is a Standard Schema v1 validator (zod, valibot, arktype, ...) or an
+  object of field definitions in the Model column style (`type`, `required`, `default`, `enum`,
+  `validation: [{ run, msg }]`). Failures answer 422 `{ status: false, data: { column, message, in } }`, the
+  `validationRouter` shape plus the section. The parsed output is in `req.validated.{body,query,params,headers}`;
+  `req.body` is replaced with the parsed body (original in `req.bodyRaw`), the Express 5 `req.query` getter is left
+  alone.
+- **`describeValidation(fn)`**: JSON Schema of the sections a `validate()` middleware checks, for API documentation
+  (field definitions always; Standard Schemas through `~standard.jsonSchema`, a `toJSONSchema()` method or the
+  `toJSONSchema` / `jsonSchema` options).
+- `isStandardSchema(value)` and the `VALIDATE` symbol.
+- `zod` as a devDependency (tests only).
+
 ## 2.0.2
 
 ### Fixed

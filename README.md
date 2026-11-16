@@ -23,6 +23,7 @@
 - [Model](#model)
 - [Crud](#crud)
 - [FilterSearch](#filtersearch)
+- [Request validation](#request-validation)
 - [DB](#db)
 - [Mail and the mail worker](#mail-and-the-mail-worker)
 - [Queue](#queue)
@@ -47,6 +48,8 @@
   mass-assignment protection and audit columns.
 - **`FilterSearch`**: a query-string filter language (`?saldo:gte=1000&orderByDesc=id&$relations=[rooms]`) checked
   against the model's columns, with pagination metadata.
+- **`validate()`**: request validation middleware for non-model input (body, query, params, headers) with any
+  Standard Schema validator (zod, valibot, arktype) or Model-style field definitions.
 - **Services**: `DB` (the app's knex instance), `Mail` and a mail queue worker, `Queue` (RabbitMQ), `View` (Edge),
   `Log` (winston), `Fetch` (axios), `Validator` (validator.js), a per-request auth helper and app-root path helpers.
 
@@ -180,6 +183,7 @@ import {
   DB, getDB, isDBReady,
   Mail, MailWorker, startMailWorker, Queue, closeQueue,
   View, Log, Fetch, fetchReady, Validator,
+  validate, describeValidation, isStandardSchema, VALIDATE,
   appRoot, appPath, appHas, importApp, importAppDefault, resetAppRoot,
 } from '@averoa/utilities';
 
@@ -206,6 +210,10 @@ import Auth from '@averoa/utilities/AuthSandbox.js';        // per-request auth 
 | `Fetch` | axios instance configured from `config/fetch.js` or env. |
 | `fetchReady` | Promise that settles once `config/fetch.js` has been applied. Same as `Fetch.ready`. |
 | `Validator` | The [validator](https://www.npmjs.com/package/validator) package. |
+| `validate(schemas, options?)` | Express middleware that validates `body`, `query`, `params` and `headers` with a Standard Schema validator (zod, valibot, arktype, ...) or Model-style field definitions. See [Request validation](#request-validation). |
+| `describeValidation(fn)` | JSON Schema of the sections a `validate()` middleware checks (used for OpenAPI generation), or `null`. |
+| `isStandardSchema(value)` | `true` for an object implementing [Standard Schema v1](https://standardschema.dev) (`~standard`). |
+| `VALIDATE` | `Symbol.for('averoa.validate')`, the property holding `{ schemas, options }` on a `validate()` middleware. |
 | `appRoot`, `appPath`, `appHas`, `importApp`, `importAppDefault`, `resetAppRoot` | App-root helpers, also available from `@averoa/utilities/paths`. |
 
 The `exports` map also allows deep imports of any module file (`@averoa/utilities/<File>.js`). Named exports that
@@ -602,6 +610,113 @@ runs on a copy without its `select` and `orderBy`, so it stays valid on PostgreS
 The soft-delete filter is qualified with that table (`u.deleted_at`), so it stays unambiguous when the builder joins
 other tables that have `deleted_at`; only the base table's rows are filtered. When the `FROM` is a raw expression or a
 subquery and `table` is not set, the filter uses the unqualified `deleted_at`.
+
+## Request validation
+
+`Model` validates crud routes. For everything else (a login form, search parameters, a webhook), `validate()`
+builds an Express middleware that checks `body`, `query`, `params` and `headers`:
+
+```js
+import Router from '@averoa/routes';
+import { validate } from '@averoa/utilities';
+
+const router = Router();
+
+router.post('/auth/login', 'AuthController@login', [validate({
+  body: {
+    email: {
+      type: 'string',
+      validation: [{ run: (v) => v.validator.isEmail(v.value), msg: 'email format required' }],
+    },
+    password: { type: 'string' },
+    remember: { type: 'boolean', required: false, default: false },
+  },
+})]);
+
+router.get('/search', 'SearchController@index', [validate({
+  query: {
+    q: { type: 'string' },
+    page: { type: 'integer', default: 1, validation: [{ run: (v) => v.raw >= 1, msg: 'must be >= 1' }] },
+  },
+})]);
+```
+
+Each section is either a [Standard Schema v1](https://standardschema.dev) validator or an object of field
+definitions. Sections run in the order `params`, `query`, `headers`, `body`, and the first failure answers.
+
+### Field definitions
+
+The built-in format follows the Model column style, so rules are written the same way:
+
+| Key | Description |
+| --- | --- |
+| `type` | `'string'`, `'integer'`, `'number'`, `'boolean'`, `'object'` or `'array'`. Optional. Strings are coerced where it is unambiguous (`'42'` is a valid integer, `'true'`/`'1'`/`'yes'`/`'on'` a valid boolean), so query strings, params and headers work. Numbers and booleans become strings for `type: 'string'`; objects and arrays are rejected unless the type says so. |
+| `required` | Default `true`. `flag: { required: false }`, as in Model columns, is accepted too. |
+| `default` | Value (or function returning one) used when the key is missing. |
+| `enum` | Allowed values, compared after coercion. |
+| `validation` | Array of `{ run, msg }`. `run({ validator, value, raw, data })` returns (or resolves to) a boolean; `value` is the string form (JSON for objects), `raw` the coerced value, `data` the whole section. Every failing rule's `msg` is reported. |
+| `description`, `example`, `format`, `schema` | Documentation only: copied into the generated JSON Schema (`schema` is merged as is). |
+
+A missing optional field is left out of the output; an optional field sent as `''` or `null` is kept as is and its
+rules don't run. Header names are matched case-insensitively. Keys that are not declared are dropped from the output.
+
+### Standard Schema validators
+
+Any library implementing Standard Schema v1 works, without an adapter: [zod](https://zod.dev) (3.24+),
+[valibot](https://valibot.dev) (1.0+), [arktype](https://arktype.io) (2.0+) and others.
+
+```js
+import { z } from 'zod';
+
+router.post('/teachers/:id/notes', 'NoteController@create', [validate({
+  params: z.object({ id: z.coerce.number().int().positive() }),
+  body: z.object({ text: z.string().min(1).max(500), pinned: z.boolean().default(false) }),
+})]);
+```
+
+The schema receives the raw section (`req.body`, `req.query`, ...), so use the library's coercion (`z.coerce`) for
+query strings and params. Asynchronous schemas are awaited.
+
+### Results
+
+On success the parsed output (coerced, defaults applied, unknown keys removed) is in `req.validated`:
+
+| Property | Content |
+| --- | --- |
+| `req.validated.body` | Parsed body. `req.body` is replaced with it, and the original is kept in `req.bodyRaw` (as `validationRouter` does). |
+| `req.validated.query` | Parsed query. `req.query` is a getter in Express 5 and is left untouched. |
+| `req.validated.params` | Parsed route parameters. `req.params` is left untouched. |
+| `req.validated.headers` | Parsed headers. `req.headers` is left untouched. |
+
+Several `validate()` middlewares on one route add to the same `req.validated`.
+
+On failure the response is **422** with the shape `validationRouter` uses, plus the section in `in`:
+
+```json
+{ "status": false, "data": { "column": "email", "message": ["email format required"], "in": "body" } }
+```
+
+`message` is `'required'` for a missing value, otherwise an array: every failing rule's `msg`, or every Standard
+Schema issue message for the first failing path. `column` is that path joined with dots (`user.name`), or `null` for
+an issue on the section itself.
+
+### Options
+
+`validate(schemas, options)`:
+
+| Option | Description |
+| --- | --- |
+| `status` | HTTP status on failure. Default `422`. |
+| `jsonSchema` | Explicit JSON Schema per section (`{ body: {...} }`) for API documentation. Wins over everything else. |
+| `toJSONSchema` | `(schema, section) => jsonSchema` for Standard Schema libraries that don't implement `~standard.jsonSchema`. |
+
+### JSON Schema for API documentation
+
+`describeValidation(middleware)` returns the JSON Schema of every section, which `@averoa/core` uses to document
+the route in its OpenAPI document. Field definitions always convert. A Standard Schema converts when its library
+implements [Standard JSON Schema](https://standardschema.dev) (`~standard.jsonSchema`, zod 4.2+), has a
+`toJSONSchema()` method, or `options.toJSONSchema` / `options.jsonSchema` is given; otherwise that section is left
+undocumented (validation still runs).
 
 ## DB
 
